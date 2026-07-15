@@ -6,9 +6,10 @@ import { AgentSession } from "./agent-session.js";
 import { AuthStorage } from "./auth-storage.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.js";
+import { createDefaultHarnesses, HarnessRunManager } from "./harness/index.js";
 import { convertToLlm } from "./messages.js";
 import { ModelRegistry } from "./model-registry.js";
-import { findInitialModel } from "./model-resolver.js";
+import { findExactModelReferenceMatch, findInitialModel } from "./model-resolver.js";
 import type { ResourceLoader } from "./resource-loader.js";
 import { DefaultResourceLoader } from "./resource-loader.js";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
@@ -38,6 +39,16 @@ import {
 	withFileMutationQueue,
 	writeTool,
 } from "./tools/index.js";
+import {
+	createSubagentOutputToolDefinition,
+	createSubagentToolDefinition,
+	resolveAgentTools,
+	type SpawnPiChild,
+	SubagentRegistry,
+} from "./tools/subagent.js";
+
+/** Maximum subagent nesting depth. Children may spawn their own subagents up to this depth. */
+const MAX_SUBAGENT_DEPTH = 5;
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -72,6 +83,11 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+
+	/** Run manager backing the subagent tool's external-CLI harnesses. Default: a fresh manager with claude/codex registered. */
+	harnessRunManager?: HarnessRunManager;
+	/** Internal: nesting level of this session in a subagent tree (0 = top-level). Set by the subagent tool's child spawner. */
+	subagentDepth?: number;
 }
 
 /** Result from createAgentSession */
@@ -82,6 +98,10 @@ export interface CreateAgentSessionResult {
 	extensionsResult: LoadExtensionsResult;
 	/** Warning if session was restored with a different model than saved */
 	modelFallbackMessage?: string;
+	/** Subagent run bookkeeping for this session. Undefined when subagent tools are disabled (depth cap reached). */
+	subagentRegistry?: SubagentRegistry;
+	/** Harness runs backing the subagent tool's external-CLI harnesses. Undefined when subagent tools are disabled. */
+	harnessRunManager?: HarnessRunManager;
 }
 
 // Re-exports
@@ -243,9 +263,62 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 
 	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
-	const initialActiveToolNames: ToolName[] = options.tools
+	const initialActiveToolNames: string[] = options.tools
 		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allTools)
-		: defaultActiveToolNames;
+		: [...defaultActiveToolNames];
+	// Children can spawn their own subagents; the depth cap only prevents a runaway chain
+	// of children spawning children forever.
+	const subagentDepth = options.subagentDepth ?? 0;
+	const subagentToolsEnabled = subagentDepth < MAX_SUBAGENT_DEPTH;
+	const parentSessionRef: { current?: AgentSession } = {};
+	let subagentTool: ToolDefinition<any, any, any> | undefined;
+	let subagentOutputTool: ToolDefinition<any, any, any> | undefined;
+	let subagentRegistry: SubagentRegistry | undefined;
+	let harnessRunManager: HarnessRunManager | undefined;
+	if (subagentToolsEnabled) {
+		initialActiveToolNames.push("subagent", "subagent_output");
+
+		// The child spawner is injected as a callback (rather than subagent.ts importing
+		// createAgentSession) to avoid a module cycle: subagent.ts -> sdk.ts -> subagent.ts.
+		subagentRegistry = new SubagentRegistry();
+		harnessRunManager = options.harnessRunManager ?? new HarnessRunManager(join(agentDir, "harness-sessions"));
+		if (!options.harnessRunManager) {
+			for (const harness of createDefaultHarnesses()) harnessRunManager.registerHarness(harness);
+		}
+		const spawnPiChild: SpawnPiChild = async (childConfig) => {
+			const childModel = childConfig.modelId
+				? (findExactModelReferenceMatch(childConfig.modelId, modelRegistry.getAll()) ?? model)
+				: model;
+			const childLoader = new DefaultResourceLoader({
+				cwd,
+				agentDir,
+				settingsManager,
+				...(childConfig.systemPrompt
+					? { systemPrompt: childConfig.systemPrompt, appendSystemPromptOverride: () => [] }
+					: {}),
+			});
+			await childLoader.reload();
+			const { session: childSession } = await createAgentSession({
+				cwd,
+				agentDir,
+				modelRegistry,
+				model: childModel,
+				tools: resolveAgentTools(cwd, childConfig.toolNames),
+				resourceLoader: childLoader,
+				settingsManager,
+				subagentDepth: subagentDepth + 1,
+			});
+			return childSession;
+		};
+		subagentTool = createSubagentToolDefinition({
+			cwd,
+			harnessRunManager,
+			registry: subagentRegistry,
+			parentSessionRef,
+			spawnPiChild,
+		});
+		subagentOutputTool = createSubagentOutputToolDefinition(subagentRegistry);
+	}
 
 	let agent: Agent;
 
@@ -348,17 +421,24 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		cwd,
 		scopedModels: options.scopedModels,
 		resourceLoader,
-		customTools: options.customTools,
+		customTools: [
+			...(options.customTools ?? []),
+			...(subagentTool ? [subagentTool] : []),
+			...(subagentOutputTool ? [subagentOutputTool] : []),
+		],
 		modelRegistry,
 		initialActiveToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});
+	parentSessionRef.current = session;
 	const extensionsResult = resourceLoader.getExtensions();
 
 	return {
 		session,
 		extensionsResult,
 		modelFallbackMessage,
+		subagentRegistry,
+		harnessRunManager,
 	};
 }

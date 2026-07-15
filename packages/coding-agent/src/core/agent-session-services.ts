@@ -38,6 +38,10 @@ export interface CreateAgentSessionServicesOptions {
 	modelRegistry?: ModelRegistry;
 	extensionFlagValues?: Map<string, boolean | string>;
 	resourceLoaderOptions?: Omit<DefaultResourceLoaderOptions, "cwd" | "agentDir" | "settingsManager">;
+	/** Named profile to layer into the default-created settings manager (ignored if settingsManager is provided) */
+	settingsProfile?: string;
+	/** CLI overrides to layer into the default-created settings manager (ignored if settingsManager is provided) */
+	settingsCliOverrides?: Record<string, unknown>;
 }
 
 /**
@@ -132,7 +136,12 @@ export async function createAgentSessionServices(
 	const cwd = options.cwd;
 	const agentDir = options.agentDir ?? getAgentDir();
 	const authStorage = options.authStorage ?? AuthStorage.create(join(agentDir, "auth.json"));
-	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
+	const settingsManager =
+		options.settingsManager ??
+		SettingsManager.create(cwd, agentDir, {
+			profile: options.settingsProfile,
+			cliOverrides: options.settingsCliOverrides,
+		});
 	const modelRegistry = options.modelRegistry ?? ModelRegistry.create(authStorage, join(agentDir, "models.json"));
 	const resourceLoader = new DefaultResourceLoader({
 		...(options.resourceLoaderOptions ?? {}),

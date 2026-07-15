@@ -1,13 +1,33 @@
 # Settings
 
-Pi uses JSON settings files with project settings overriding global settings.
+Pi uses JSON settings files, layered low to high precedence:
 
 | Location | Scope |
 |----------|-------|
 | `~/.pi/agent/settings.json` | Global (all projects) |
+| `~/.pi/agent/profiles/<name>.json` | Profile, only when `--profile <name>` is passed |
 | `.pi/settings.json` | Project (current directory) |
+| `--config key.path=value` | CLI override (highest precedence, in-memory only) |
 
-Edit directly or use `/settings` for common options.
+Nested objects merge recursively at each layer; arrays and scalars in a higher layer replace the lower layer's value.
+
+Edit settings files directly or use `/settings` for common options. Settings changed via `/settings` or other commands are always written to the global or project file, never to a profile or `--config` override.
+
+## Profiles
+
+`--profile <name>` loads `~/.pi/agent/profiles/<name>.json` and layers it between global and project settings. Useful for switching between named configurations (e.g. a "work" profile with a different default model). Exits with an error listing available profiles if the named profile file doesn't exist.
+
+```bash
+pi --profile work
+```
+
+## CLI Overrides
+
+`--config key.path=value` (repeatable) sets a settings value by dotted path, applied on top of every other layer. The value is parsed as JSON, falling back to a raw string if it isn't valid JSON.
+
+```bash
+pi --config theme=dark --config 'statusLine=["model","git-branch"]'
+```
 
 ## All Settings
 
@@ -46,6 +66,36 @@ Edit directly or use `/settings` for common options.
 | `editorPaddingX` | number | `0` | Horizontal padding for input editor (0-3) |
 | `autocompleteMaxVisible` | number | `5` | Max visible items in autocomplete dropdown (3-20) |
 | `showHardwareCursor` | boolean | `false` | Show terminal cursor |
+| `statusLine` | string[] | - | Ordered list of footer item ids. Unset shows the default footer (see below) |
+| `statusLineSeparator` | string | `" · "` | Separator between statusline items |
+| `sidebar` | boolean | `true` | Show the session sidebar pane (session/model/context/git + active agent runs) when terminal width is at least 120 columns. Toggle with `/sidebar` or `Ctrl+X` |
+
+#### statusLine
+
+When set, replaces the default footer with a single line built from the given item ids, in order. Unknown ids render as literal text, so they can be used as labels or custom separators.
+
+| Item id | Shows |
+|---------|-------|
+| `model` | Current model id |
+| `thinking-level` | Current thinking level, if the model supports it |
+| `current-dir` | Basename of the working directory (`~` if home) |
+| `project-root` | Basename of the git repo root, if in a repo |
+| `git-branch` | Git branch, with a `*` suffix if the working tree is dirty |
+| `context-remaining` | Percentage of context window left, e.g. `"62% left"` |
+| `used-tokens` | Total tokens used this session, compact form (e.g. `12.3k`) |
+| `cost` | Session cost in USD, if computable |
+| `session-name` | Session name, if set |
+| `version` | Pi version |
+| `status` | Extension statuses set via `ctx.ui.setStatus()` |
+
+Items that have no value are dropped (no double separators).
+
+```json
+{
+  "statusLine": ["current-dir", "git-branch", "model", "context-remaining"],
+  "statusLineSeparator": " | "
+}
+```
 
 ### Compaction
 

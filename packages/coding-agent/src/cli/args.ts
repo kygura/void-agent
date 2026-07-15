@@ -42,6 +42,8 @@ export interface Args {
 	listModels?: string | true;
 	offline?: boolean;
 	verbose?: boolean;
+	profile?: string;
+	configOverrides?: Array<{ path: string; raw: string }>;
 	messages: string[];
 	fileArgs: string[];
 	/** Unknown flags (potentially extension flags) - map of flag name to value */
@@ -143,6 +145,20 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--theme" && i + 1 < args.length) {
 			result.themes = result.themes ?? [];
 			result.themes.push(args[++i]);
+		} else if (arg === "--profile" && i + 1 < args.length) {
+			result.profile = args[++i];
+		} else if (arg === "--config" && i + 1 < args.length) {
+			const entry = args[++i];
+			const eqIndex = entry.indexOf("=");
+			if (eqIndex === -1) {
+				result.diagnostics.push({
+					type: "error",
+					message: `Invalid --config value "${entry}", expected key.path=value`,
+				});
+			} else {
+				result.configOverrides = result.configOverrides ?? [];
+				result.configOverrides.push({ path: entry.slice(0, eqIndex), raw: entry.slice(eqIndex + 1) });
+			}
 		} else if (arg === "--no-skills" || arg === "-ns") {
 			result.noSkills = true;
 		} else if (arg === "--no-prompt-templates" || arg === "-np") {
@@ -239,6 +255,10 @@ ${chalk.bold("Options:")}
   --no-prompt-templates, -np     Disable prompt template discovery and loading
   --theme <path>                 Load a theme file or directory (can be used multiple times)
   --no-themes                    Disable theme discovery and loading
+  --profile <name>               Layer settings from ~/${CONFIG_DIR_NAME}/agent/profiles/<name>.json
+                                 (precedence: global < profile < project < --config)
+  --config <key.path=value>      Override a settings key (dotted path, can be used multiple times)
+                                 Value is parsed as JSON, falling back to a raw string
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup (overrides quietStartup setting)

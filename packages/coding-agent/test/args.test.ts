@@ -205,6 +205,47 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--profile flag", () => {
+		test("parses --profile", () => {
+			const result = parseArgs(["--profile", "work"]);
+			expect(result.profile).toBe("work");
+		});
+	});
+
+	describe("--config flag", () => {
+		test("parses a top-level key=value entry", () => {
+			const result = parseArgs(["--config", "theme=dark"]);
+			expect(result.configOverrides).toEqual([{ path: "theme", raw: "dark" }]);
+		});
+
+		test("parses a dotted key.path=value entry", () => {
+			const result = parseArgs(["--config", "compaction.reserveTokens=8192"]);
+			expect(result.configOverrides).toEqual([{ path: "compaction.reserveTokens", raw: "8192" }]);
+		});
+
+		test("keeps the raw JSON-looking value as a string for later parsing", () => {
+			const result = parseArgs(["--config", 'statusLine=["model","git-branch"]']);
+			expect(result.configOverrides).toEqual([{ path: "statusLine", raw: '["model","git-branch"]' }]);
+		});
+
+		test("parses multiple --config flags in order", () => {
+			const result = parseArgs(["--config", "theme=dark", "--config", "defaultModel=gpt-4o"]);
+			expect(result.configOverrides).toEqual([
+				{ path: "theme", raw: "dark" },
+				{ path: "defaultModel", raw: "gpt-4o" },
+			]);
+		});
+
+		test("reports a diagnostic error for a value missing '='", () => {
+			const result = parseArgs(["--config", "theme"]);
+			expect(result.configOverrides).toBeUndefined();
+			expect(result.diagnostics).toContainEqual({
+				type: "error",
+				message: 'Invalid --config value "theme", expected key.path=value',
+			});
+		});
+	});
+
 	describe("--no-skills flag", () => {
 		test("parses --no-skills flag", () => {
 			const result = parseArgs(["--no-skills"]);

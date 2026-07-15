@@ -71,6 +71,7 @@ import { copyToClipboard } from "../../utils/clipboard.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
 import { parseGitUrl } from "../../utils/git.js";
 import { ensureTool } from "../../utils/tools-manager.js";
+import { AgentsOverlayComponent } from "./components/agents-overlay.js";
 import { ArminComponent } from "./components/armin.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
 import { BashExecutionComponent } from "./components/bash-execution.js";
@@ -92,6 +93,7 @@ import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
+import { Sidebar, SidebarLayout } from "./components/sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
@@ -238,6 +240,14 @@ export class InteractiveMode {
 	// Header container that holds the built-in or custom header
 	private headerContainer: Container;
 
+	// Chat area (message history, status, editor, extension widgets) wrapped with the
+	// sidebar via SidebarLayout. See sidebar.ts for the width/setting breakpoint.
+	private chatColumn: Container;
+	private sidebar: Sidebar;
+	private sidebarLayout: SidebarLayout;
+	// Unsubscribe from the current session's SubagentRegistry/HarnessRunManager change events
+	private agentPanelsUnsubscribe?: () => void;
+
 	// Built-in header (logo + keybinding hints + changelog)
 	private builtInHeader: Component | undefined = undefined;
 
@@ -286,6 +296,9 @@ export class InteractiveMode {
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
 		this.footer = new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+		this.chatColumn = new Container();
+		this.sidebar = new Sidebar(this.session, this.runtimeHost, this.footerDataProvider);
+		this.sidebarLayout = new SidebarLayout(this.chatColumn, this.sidebar, this.settingsManager);
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
@@ -512,13 +525,14 @@ export class InteractiveMode {
 			}
 		}
 
-		this.ui.addChild(this.chatContainer);
-		this.ui.addChild(this.pendingMessagesContainer);
-		this.ui.addChild(this.statusContainer);
+		this.chatColumn.addChild(this.chatContainer);
+		this.chatColumn.addChild(this.pendingMessagesContainer);
+		this.chatColumn.addChild(this.statusContainer);
 		this.renderWidgets(); // Initialize with default spacer
-		this.ui.addChild(this.widgetContainerAbove);
-		this.ui.addChild(this.editorContainer);
-		this.ui.addChild(this.widgetContainerBelow);
+		this.chatColumn.addChild(this.widgetContainerAbove);
+		this.chatColumn.addChild(this.editorContainer);
+		this.chatColumn.addChild(this.widgetContainerBelow);
+		this.ui.addChild(this.sidebarLayout);
 		this.ui.addChild(this.footer);
 		this.ui.setFocus(this.editor);
 
@@ -540,6 +554,7 @@ export class InteractiveMode {
 
 		// Subscribe to agent events
 		this.subscribeToAgent();
+		this.subscribeToAgentPanels();
 
 		// Set up theme file watcher
 		onThemeChange(() => {
@@ -1259,6 +1274,7 @@ export class InteractiveMode {
 	private applyRuntimeSettings(): void {
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+		this.sidebar.setSession(this.session);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
@@ -1280,6 +1296,7 @@ export class InteractiveMode {
 		this.applyRuntimeSettings();
 		await this.bindCurrentSessionExtensions();
 		this.subscribeToAgent();
+		this.subscribeToAgentPanels();
 		await this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
@@ -2059,6 +2076,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.sidebar.toggle", () => this.toggleSidebar());
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -2209,6 +2227,16 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/sidebar") {
+				this.editor.setText("");
+				this.toggleSidebar();
+				return;
+			}
+			if (text === "/agents") {
+				this.editor.setText("");
+				this.showAgentsOverlay();
+				return;
+			}
 			if (text === "/quit") {
 				this.editor.setText("");
 				await this.shutdown();
@@ -2265,6 +2293,48 @@ export class InteractiveMode {
 			}
 			this.editor.addToHistory?.(text);
 		};
+	}
+
+	/**
+	 * Subscribes the sidebar/agents overlay to the current session's SubagentRegistry and
+	 * HarnessRunManager so they refresh on run state changes. Re-run on every session
+	 * replacement (switch/new/fork), since each session gets fresh instances.
+	 */
+	private subscribeToAgentPanels(): void {
+		this.agentPanelsUnsubscribe?.();
+		const subagentRegistry = this.runtimeHost.subagentRegistry;
+		const harnessRunManager = this.runtimeHost.harnessRunManager;
+		const unsubscribers: Array<() => void> = [];
+		if (subagentRegistry) {
+			unsubscribers.push(subagentRegistry.onChange(() => this.ui.requestRender()));
+		}
+		if (harnessRunManager) {
+			unsubscribers.push(harnessRunManager.subscribe(() => this.ui.requestRender()));
+		}
+		this.agentPanelsUnsubscribe = () => {
+			for (const unsub of unsubscribers) unsub();
+		};
+	}
+
+	private toggleSidebar(): void {
+		const enabled = !this.settingsManager.getSidebar();
+		this.settingsManager.setSidebar(enabled);
+		this.showStatus(`Sidebar: ${enabled ? "enabled" : "disabled"}`);
+	}
+
+	private showAgentsOverlay(): void {
+		this.showSelector((done) => {
+			const overlay = new AgentsOverlayComponent(
+				this.runtimeHost.subagentRegistry,
+				this.runtimeHost.harnessRunManager,
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				() => this.ui.requestRender(),
+			);
+			return { component: overlay, focus: overlay };
+		});
 	}
 
 	private subscribeToAgent(): void {

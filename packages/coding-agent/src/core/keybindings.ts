@@ -39,6 +39,7 @@ export interface AppKeybindings {
 	"app.session.rename": true;
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
+	"app.sidebar.toggle": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -130,6 +131,10 @@ export const KEYBINDINGS = {
 	"app.session.deleteNoninvasive": {
 		defaultKeys: "ctrl+backspace",
 		description: "Delete session when query is empty",
+	},
+	"app.sidebar.toggle": {
+		defaultKeys: "ctrl+x",
+		description: "Toggle the session sidebar",
 	},
 } as const satisfies KeybindingDefinitions;
 

@@ -1,8 +1,9 @@
 import type { Transport } from "@mariozechner/pi-ai";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
-import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
+import { CONFIG_DIR_NAME, getAgentDir, getProfilesDir } from "../config.js";
+import { mergeConfig } from "./merge-config.js";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -95,37 +96,14 @@ export interface Settings {
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
+	statusLine?: string[]; // Ordered list of kebab-case footer item ids (see status-line.ts catalog). Unset = default footer.
+	statusLineSeparator?: string; // default: " · "
+	sidebar?: boolean; // default: true - show the session sidebar pane when terminal width >= 120
 }
 
-/** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
+/** Deep merge settings: overlay takes precedence, nested objects merge recursively */
 function deepMergeSettings(base: Settings, overrides: Settings): Settings {
-	const result: Settings = { ...base };
-
-	for (const key of Object.keys(overrides) as (keyof Settings)[]) {
-		const overrideValue = overrides[key];
-		const baseValue = base[key];
-
-		if (overrideValue === undefined) {
-			continue;
-		}
-
-		// For nested objects, merge recursively
-		if (
-			typeof overrideValue === "object" &&
-			overrideValue !== null &&
-			!Array.isArray(overrideValue) &&
-			typeof baseValue === "object" &&
-			baseValue !== null &&
-			!Array.isArray(baseValue)
-		) {
-			(result as Record<string, unknown>)[key] = { ...baseValue, ...overrideValue };
-		} else {
-			// For primitives and arrays, override value wins
-			(result as Record<string, unknown>)[key] = overrideValue;
-		}
-	}
-
-	return result;
+	return mergeConfig(base as Record<string, unknown>, overrides as Record<string, unknown>) as Settings;
 }
 
 export type SettingsScope = "global" | "project";
@@ -223,10 +201,19 @@ export class InMemorySettingsStorage implements SettingsStorage {
 	}
 }
 
+export interface SettingsManagerCreateOptions {
+	/** Named profile layered between global and project settings (~/.pi/agent/profiles/<name>.json) */
+	profile?: string;
+	/** Highest-precedence in-memory overrides, e.g. built from repeated `-c key.path=value` CLI flags */
+	cliOverrides?: Record<string, unknown>;
+}
+
 export class SettingsManager {
 	private storage: SettingsStorage;
 	private globalSettings: Settings;
 	private projectSettings: Settings;
+	private profileSettings: Settings;
+	private cliOverrides: Settings;
 	private settings: Settings;
 	private modifiedFields = new Set<keyof Settings>(); // Track global fields modified during session
 	private modifiedNestedFields = new Map<keyof Settings, Set<string>>(); // Track global nested field modifications
@@ -244,24 +231,67 @@ export class SettingsManager {
 		globalLoadError: Error | null = null,
 		projectLoadError: Error | null = null,
 		initialErrors: SettingsError[] = [],
+		initialProfile: Settings = {},
+		initialCliOverrides: Settings = {},
 	) {
 		this.storage = storage;
 		this.globalSettings = initialGlobal;
 		this.projectSettings = initialProject;
+		this.profileSettings = initialProfile;
+		this.cliOverrides = initialCliOverrides;
 		this.globalSettingsLoadError = globalLoadError;
 		this.projectSettingsLoadError = projectLoadError;
 		this.errors = [...initialErrors];
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.settings = this.computeSettings();
+	}
+
+	/**
+	 * Layer stack, low to high precedence: global -> profile -> project -> CLI overrides.
+	 * Built-in defaults are applied per-getter (e.g. `?? "default"`), not stored here.
+	 */
+	private computeSettings(): Settings {
+		let merged = deepMergeSettings(this.globalSettings, this.profileSettings);
+		merged = deepMergeSettings(merged, this.projectSettings);
+		merged = deepMergeSettings(merged, this.cliOverrides);
+		return merged;
 	}
 
 	/** Create a SettingsManager that loads from files */
-	static create(cwd: string = process.cwd(), agentDir: string = getAgentDir()): SettingsManager {
+	static create(
+		cwd: string = process.cwd(),
+		agentDir: string = getAgentDir(),
+		options: SettingsManagerCreateOptions = {},
+	): SettingsManager {
 		const storage = new FileSettingsStorage(cwd, agentDir);
-		return SettingsManager.fromStorage(storage);
+		const profileSettings = options.profile ? SettingsManager.loadProfileSettings(agentDir, options.profile) : {};
+		return SettingsManager.fromStorage(storage, {
+			profileSettings,
+			cliOverrides: (options.cliOverrides as Settings) ?? {},
+		});
+	}
+
+	/** Load a named profile's settings file, throwing a clear error (listing available profiles) if missing */
+	private static loadProfileSettings(agentDir: string, profile: string): Settings {
+		const profilesDir = getProfilesDir(agentDir);
+		const profilePath = join(profilesDir, `${profile}.json`);
+		if (!existsSync(profilePath)) {
+			const available = existsSync(profilesDir)
+				? readdirSync(profilesDir)
+						.filter((f) => f.endsWith(".json"))
+						.map((f) => f.slice(0, -5))
+				: [];
+			const availableText = available.length > 0 ? available.join(", ") : "(none found)";
+			throw new Error(`Profile "${profile}" not found at ${profilePath}. Available profiles: ${availableText}`);
+		}
+		const content = readFileSync(profilePath, "utf-8");
+		return SettingsManager.migrateSettings(JSON.parse(content));
 	}
 
 	/** Create a SettingsManager from an arbitrary storage backend */
-	static fromStorage(storage: SettingsStorage): SettingsManager {
+	static fromStorage(
+		storage: SettingsStorage,
+		layers: { profileSettings?: Settings; cliOverrides?: Settings } = {},
+	): SettingsManager {
 		const globalLoad = SettingsManager.tryLoadFromStorage(storage, "global");
 		const projectLoad = SettingsManager.tryLoadFromStorage(storage, "project");
 		const initialErrors: SettingsError[] = [];
@@ -279,6 +309,8 @@ export class SettingsManager {
 			globalLoad.error,
 			projectLoad.error,
 			initialErrors,
+			layers.profileSettings ?? {},
+			layers.cliOverrides ?? {},
 		);
 	}
 
@@ -384,7 +416,7 @@ export class SettingsManager {
 			this.recordError("project", projectLoad.error);
 		}
 
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.settings = this.computeSettings();
 	}
 
 	/** Apply additional overrides on top of current settings */
@@ -481,7 +513,7 @@ export class SettingsManager {
 	}
 
 	private save(): void {
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.settings = this.computeSettings();
 
 		if (this.globalSettingsLoadError) {
 			return;
@@ -498,7 +530,7 @@ export class SettingsManager {
 
 	private saveProjectSettings(settings: Settings): void {
 		this.projectSettings = structuredClone(settings);
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.settings = this.computeSettings();
 
 		if (this.projectSettingsLoadError) {
 			return;
@@ -955,5 +987,23 @@ export class SettingsManager {
 
 	getCodeBlockIndent(): string {
 		return this.settings.markdown?.codeBlockIndent ?? "  ";
+	}
+
+	getStatusLine(): string[] | undefined {
+		return this.settings.statusLine;
+	}
+
+	getStatusLineSeparator(): string {
+		return this.settings.statusLineSeparator ?? " · ";
+	}
+
+	getSidebar(): boolean {
+		return this.settings.sidebar ?? true;
+	}
+
+	setSidebar(enabled: boolean): void {
+		this.globalSettings.sidebar = enabled;
+		this.markModified("sidebar");
+		this.save();
 	}
 }

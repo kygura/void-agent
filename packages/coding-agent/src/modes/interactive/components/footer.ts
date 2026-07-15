@@ -1,30 +1,9 @@
 import { type Component, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { VERSION } from "../../../config.js";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
 import { theme } from "../theme/theme.js";
-
-/**
- * Sanitize text for display in a single-line status.
- * Removes newlines, tabs, carriage returns, and other control characters.
- */
-function sanitizeStatusText(text: string): string {
-	// Replace newlines, tabs, carriage returns with space, then collapse multiple spaces
-	return text
-		.replace(/[\r\n\t]/g, " ")
-		.replace(/ +/g, " ")
-		.trim();
-}
-
-/**
- * Format token counts (similar to web-ui)
- */
-function formatTokens(count: number): string {
-	if (count < 1000) return count.toString();
-	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-	if (count < 1000000) return `${Math.round(count / 1000)}k`;
-	if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
-	return `${Math.round(count / 1000000)}M`;
-}
+import { buildStatusLineItems, formatTokens, type StatusLineData, sanitizeStatusText } from "./status-line.js";
 
 /**
  * Footer component that shows pwd, token stats, and context usage.
@@ -89,6 +68,26 @@ export class FooterComponent implements Component {
 		const contextPercentValue = contextUsage?.percent ?? 0;
 		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
+		// Show cost with "(sub)" indicator if using OAuth subscription
+		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
+
+		// Configurable statusline: when settings.statusLine is set, it replaces the entire default
+		// footer with a single themed line built from the ordered item ids. Unset (the default)
+		// falls through to the legacy multi-line footer below, unchanged.
+		const settingsManager = this.session.settingsManager;
+		const statusLineIds = settingsManager?.getStatusLine();
+		if (statusLineIds && statusLineIds.length > 0) {
+			return this.renderStatusLine(width, statusLineIds, settingsManager!.getStatusLineSeparator(), {
+				totalInput,
+				totalOutput,
+				totalCacheRead,
+				totalCacheWrite,
+				totalCost,
+				usingSubscription,
+				contextPercent: contextUsage?.percent ?? null,
+			});
+		}
+
 		// Replace home directory with ~
 		let pwd = this.session.sessionManager.getCwd();
 		const home = process.env.HOME || process.env.USERPROFILE;
@@ -115,8 +114,6 @@ export class FooterComponent implements Component {
 		if (totalCacheRead) statsParts.push(`R${formatTokens(totalCacheRead)}`);
 		if (totalCacheWrite) statsParts.push(`W${formatTokens(totalCacheWrite)}`);
 
-		// Show cost with "(sub)" indicator if using OAuth subscription
-		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
 		if (totalCost || usingSubscription) {
 			const costStr = `$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`;
 			statsParts.push(costStr);
@@ -216,5 +213,43 @@ export class FooterComponent implements Component {
 		}
 
 		return lines;
+	}
+
+	/** Render the configurable statusline (settings.statusLine) as a single themed line. */
+	private renderStatusLine(
+		width: number,
+		ids: string[],
+		separator: string,
+		usage: {
+			totalInput: number;
+			totalOutput: number;
+			totalCacheRead: number;
+			totalCacheWrite: number;
+			totalCost: number;
+			usingSubscription: boolean;
+			contextPercent: number | null;
+		},
+	): string[] {
+		const state = this.session.state;
+		const data: StatusLineData = {
+			modelId: state.model?.id,
+			modelSupportsThinking: !!state.model?.reasoning,
+			thinkingLevel: state.thinkingLevel || "off",
+			cwd: this.session.sessionManager.getCwd(),
+			gitBranch: this.footerData.getGitBranch(),
+			gitDirty: this.footerData.getGitDirty(),
+			gitRoot: this.footerData.getGitRoot(),
+			contextPercent: usage.contextPercent,
+			usedTokens: usage.totalInput + usage.totalOutput + usage.totalCacheRead + usage.totalCacheWrite,
+			costUsd: usage.totalCost || usage.usingSubscription ? usage.totalCost : undefined,
+			usingSubscription: usage.usingSubscription,
+			sessionName: this.session.sessionManager.getSessionName(),
+			version: VERSION,
+			extensionStatuses: this.footerData.getExtensionStatuses(),
+		};
+
+		const items = buildStatusLineItems(data, ids);
+		const line = items.join(theme.fg("dim", separator));
+		return [truncateToWidth(line, width, theme.fg("dim", "..."))];
 	}
 }

@@ -25,6 +25,7 @@ import {
 import { AuthStorage } from "./core/auth-storage.js";
 import { exportFromFile } from "./core/export-html/index.js";
 import { KeybindingsManager } from "./core/keybindings.js";
+import { buildConfigOverrides } from "./core/merge-config.js";
 import type { ModelRegistry } from "./core/model-registry.js";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.js";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.js";
@@ -483,7 +484,14 @@ export async function main(args: string[]) {
 
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
-	const startupSettingsManager = SettingsManager.create(cwd, agentDir);
+	const cliOverrides = parsed.configOverrides ? buildConfigOverrides(parsed.configOverrides) : undefined;
+	let startupSettingsManager: SettingsManager;
+	try {
+		startupSettingsManager = SettingsManager.create(cwd, agentDir, { profile: parsed.profile, cliOverrides });
+	} catch (error) {
+		console.error(chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
+		process.exit(1);
+	}
 	reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "startup session lookup"));
 
 	// Decide the final runtime cwd before creating cwd-bound runtime services.
@@ -524,6 +532,8 @@ export async function main(args: string[]) {
 			agentDir,
 			authStorage,
 			extensionFlagValues: parsed.unknownFlags,
+			settingsProfile: parsed.profile,
+			settingsCliOverrides: cliOverrides,
 			resourceLoaderOptions: {
 				additionalExtensionPaths: resolvedExtensionPaths,
 				additionalSkillPaths: resolvedSkillPaths,

@@ -86,9 +86,12 @@ function resolveBranchWithGitAsync(repoDir: string): Promise<string | null> {
 export class FooterDataProvider {
 	private cwd: string;
 	private static readonly WATCH_DEBOUNCE_MS = 500;
+	private static readonly DIRTY_CACHE_TTL_MS = 1000;
 
 	private extensionStatuses = new Map<string, string>();
 	private cachedBranch: string | null | undefined = undefined;
+	private cachedDirty: boolean | null | undefined = undefined;
+	private dirtyCachedAt = 0;
 	private gitPaths: GitPaths | null | undefined = undefined;
 	private headWatcher: FSWatcher | null = null;
 	private reftableWatcher: FSWatcher | null = null;
@@ -118,6 +121,33 @@ export class FooterDataProvider {
 	/** Extension status texts set via ctx.ui.setStatus() */
 	getExtensionStatuses(): ReadonlyMap<string, string> {
 		return this.extensionStatuses;
+	}
+
+	/** Absolute path to the git repo root (the directory containing .git), null if not in a repo */
+	getGitRoot(): string | null {
+		return this.gitPaths?.repoDir ?? null;
+	}
+
+	/**
+	 * Whether the working tree has uncommitted changes. null if not in a repo or git is unavailable.
+	 * ponytail: polls `git status --porcelain` on a 1s TTL cache rather than fs-watching the whole
+	 * working tree; switch to a watcher if this becomes a hot path (currently only used by the
+	 * opt-in `git-branch` statusline item).
+	 */
+	getGitDirty(): boolean | null {
+		if (!this.gitPaths) return null;
+		const now = Date.now();
+		if (this.cachedDirty !== undefined && now - this.dirtyCachedAt < FooterDataProvider.DIRTY_CACHE_TTL_MS) {
+			return this.cachedDirty;
+		}
+		const result = spawnSync("git", ["--no-optional-locks", "status", "--porcelain"], {
+			cwd: this.gitPaths.repoDir,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		this.cachedDirty = result.status === 0 ? result.stdout.trim().length > 0 : null;
+		this.dirtyCachedAt = now;
+		return this.cachedDirty;
 	}
 
 	/** Subscribe to git branch changes. Returns unsubscribe function. */
@@ -335,5 +365,10 @@ export class FooterDataProvider {
 /** Read-only view for extensions - excludes setExtensionStatus, setAvailableProviderCount and dispose */
 export type ReadonlyFooterDataProvider = Pick<
 	FooterDataProvider,
-	"getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange"
+	| "getGitBranch"
+	| "getGitRoot"
+	| "getGitDirty"
+	| "getExtensionStatuses"
+	| "getAvailableProviderCount"
+	| "onBranchChange"
 >;

@@ -235,6 +235,21 @@ export function getSessionsDir(): string {
 	return join(getAgentDir(), "sessions");
 }
 
+/** Get path to harness sessions directory (external-CLI-agent run history) */
+export function getHarnessSessionsDir(agentDir: string = getAgentDir()): string {
+	return join(agentDir, "harness-sessions");
+}
+
+/** Get path to user-level subagent definitions directory (~/.pi/agent/agents) */
+export function getAgentsDir(): string {
+	return join(getAgentDir(), "agents");
+}
+
+/** Get path to CLI profiles directory (~/.pi/agent/profiles/<name>.json) */
+export function getProfilesDir(agentDir: string = getAgentDir()): string {
+	return join(agentDir, "profiles");
+}
+
 /** Get path to debug log file */
 export function getDebugLogPath(): string {
 	return join(getAgentDir(), `${APP_NAME}-debug.log`);

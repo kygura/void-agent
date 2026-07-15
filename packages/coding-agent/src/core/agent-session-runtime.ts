@@ -4,9 +4,11 @@ import type { AgentSession } from "./agent-session.js";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.js";
 import type { SessionStartEvent } from "./extensions/index.js";
 import { emitSessionShutdownEvent } from "./extensions/runner.js";
+import type { HarnessRunManager } from "./harness/index.js";
 import type { CreateAgentSessionResult } from "./sdk.js";
 import { assertSessionCwdExists } from "./session-cwd.js";
 import { SessionManager } from "./session-manager.js";
+import type { SubagentRegistry } from "./tools/subagent.js";
 
 /**
  * Result returned by runtime creation.
@@ -58,6 +60,8 @@ export class AgentSessionRuntime {
 		private readonly createRuntime: CreateAgentSessionRuntimeFactory,
 		private _diagnostics: AgentSessionRuntimeDiagnostic[] = [],
 		private _modelFallbackMessage?: string,
+		private _subagentRegistry?: SubagentRegistry,
+		private _harnessRunManager?: HarnessRunManager,
 	) {}
 
 	get services(): AgentSessionServices {
@@ -78,6 +82,16 @@ export class AgentSessionRuntime {
 
 	get modelFallbackMessage(): string | undefined {
 		return this._modelFallbackMessage;
+	}
+
+	/** Subagent run bookkeeping for the current session. Follows session replacement (switch/new/fork). */
+	get subagentRegistry(): SubagentRegistry | undefined {
+		return this._subagentRegistry;
+	}
+
+	/** Harness runs backing the current session's subagent tool. Follows session replacement (switch/new/fork). */
+	get harnessRunManager(): HarnessRunManager | undefined {
+		return this._harnessRunManager;
 	}
 
 	private async emitBeforeSwitch(
@@ -123,6 +137,8 @@ export class AgentSessionRuntime {
 		this._services = result.services;
 		this._diagnostics = result.diagnostics;
 		this._modelFallbackMessage = result.modelFallbackMessage;
+		this._subagentRegistry = result.subagentRegistry;
+		this._harnessRunManager = result.harnessRunManager;
 	}
 
 	async switchSession(sessionPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
@@ -316,6 +332,8 @@ export async function createAgentSessionRuntime(
 		createRuntime,
 		result.diagnostics,
 		result.modelFallbackMessage,
+		result.subagentRegistry,
+		result.harnessRunManager,
 	);
 }
 
