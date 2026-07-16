@@ -42,6 +42,7 @@ import {
 	getAgentDir,
 	getAuthPath,
 	getDebugLogPath,
+	getInputHistoryPath,
 	getShareViewerUrl,
 	getUpdateInstruction,
 	VERSION,
@@ -301,6 +302,7 @@ export class InteractiveMode {
 			autocompleteMaxVisible,
 		});
 		this.editor = this.defaultEditor;
+		this.setupInputHistoryPersistence();
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
@@ -678,6 +680,12 @@ export class InteractiveMode {
 
 		if (modelFallbackMessage) {
 			this.showWarning(modelFallbackMessage);
+		}
+
+		// No auth configured yet: default to OAuth login instead of asking for API keys
+		if (this.session.modelRegistry.getAvailable().length === 0) {
+			this.showStatus("No providers configured — select one to log in");
+			await this.showOAuthSelector("login");
 		}
 
 		// Process initial messages
@@ -3139,6 +3147,38 @@ export class InteractiveMode {
 	}
 
 	/**
+	 * Seed the editor's up/down history from disk and persist new entries,
+	 * keyed by cwd so each project keeps its own history.
+	 */
+	private setupInputHistoryPersistence(): void {
+		const historyPath = getInputHistoryPath();
+		const cwd = this.sessionManager.getCwd();
+		// ponytail: whole-file rewrite per entry; fine at 100 entries per cwd
+		let store: Record<string, string[]> = {};
+		try {
+			store = JSON.parse(fs.readFileSync(historyPath, "utf-8"));
+		} catch {
+			// Missing or unreadable history file: start fresh
+		}
+		const entries = Array.isArray(store[cwd]) ? store[cwd] : [];
+		if (entries.length > 0) {
+			this.defaultEditor.seedHistory([...entries].reverse());
+		}
+		this.defaultEditor.onHistoryAppend = (text) => {
+			const trimmed = text.trim();
+			if (!trimmed) return;
+			const current = Array.isArray(store[cwd]) ? store[cwd] : [];
+			if (current[0] === trimmed) return;
+			store[cwd] = [trimmed, ...current].slice(0, 100);
+			try {
+				fs.writeFileSync(historyPath, JSON.stringify(store, null, 2));
+			} catch {
+				// Best-effort persistence
+			}
+		};
+	}
+
+	/**
 	 * Gracefully shutdown the agent.
 	 * Emits shutdown event to extensions, then exits.
 	 */
@@ -4242,6 +4282,9 @@ export class InteractiveMode {
 		const dialog = new LoginDialogComponent(this.ui, providerId, (_success, _message) => {
 			// Completion handled below
 		});
+		dialog.onExitApp = () => {
+			void this.shutdown();
+		};
 
 		// Show dialog in editor container
 		this.editorContainer.clear();

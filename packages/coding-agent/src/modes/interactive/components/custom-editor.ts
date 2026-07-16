@@ -12,6 +12,8 @@ export class CustomEditor extends Editor {
 	public onEscape?: () => void;
 	public onCtrlD?: () => void;
 	public onPasteImage?: () => void;
+	/** Called after an entry is added to in-memory history (for persistence) */
+	public onHistoryAppend?: (text: string) => void;
 	/** Handler for extension-registered shortcuts. Returns true if handled. */
 	public onExtensionShortcut?: (data: string) => boolean;
 
@@ -25,6 +27,16 @@ export class CustomEditor extends Editor {
 	 */
 	onAction(action: AppKeybinding, handler: () => boolean | void | Promise<void>): void {
 		this.actionHandlers.set(action, handler);
+	}
+
+	addToHistory(text: string): void {
+		super.addToHistory(text);
+		this.onHistoryAppend?.(text);
+	}
+
+	/** Seed history entries (oldest first) without triggering onHistoryAppend */
+	seedHistory(entries: string[]): void {
+		for (const entry of entries) super.addToHistory(entry);
 	}
 
 	handleInput(data: string): void {

@@ -215,6 +215,11 @@ export function getSettingsPath(): string {
 	return join(getAgentDir(), "settings.json");
 }
 
+/** Get path to the persisted editor input history (per-cwd) */
+export function getInputHistoryPath(): string {
+	return join(getAgentDir(), "input-history.json");
+}
+
 /** Get path to tools directory */
 export function getToolsDir(): string {
 	return join(getAgentDir(), "tools");

@@ -33,7 +33,6 @@ export * from "./types.js";
 // ============================================================================
 
 import { anthropicOAuthProvider } from "./anthropic.js";
-import { githubCopilotOAuthProvider } from "./github-copilot.js";
 import { antigravityOAuthProvider } from "./google-antigravity.js";
 import { geminiCliOAuthProvider } from "./google-gemini-cli.js";
 import { openaiCodexOAuthProvider } from "./openai-codex.js";
@@ -41,10 +40,9 @@ import type { OAuthCredentials, OAuthProviderId, OAuthProviderInfo, OAuthProvide
 
 const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
 	anthropicOAuthProvider,
-	githubCopilotOAuthProvider,
+	openaiCodexOAuthProvider,
 	geminiCliOAuthProvider,
 	antigravityOAuthProvider,
-	openaiCodexOAuthProvider,
 ];
 
 const oauthProviderRegistry = new Map<string, OAuthProviderInterface>(

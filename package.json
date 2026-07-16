@@ -13,6 +13,9 @@
 	],
 	"scripts": {
 		"clean": "bun run --filter '*' clean",
+		"start": "./packages/coding-agent/dist/void",
+		"start:build": "bun run --cwd packages/coding-agent build:binary && ./packages/coding-agent/dist/void",
+		"install:global": "bun run --cwd packages/coding-agent build:binary && ln -sfn \"$(pwd)/packages/coding-agent/dist/void\" \"$(npm prefix -g)/bin/void\"",
 		"build": "bun run --cwd packages/tui build && bun run --cwd packages/ai build && bun run --cwd packages/agent build && bun run --cwd packages/coding-agent build && bun run --cwd packages/mom build && bun run --cwd packages/web-ui build && bun run --cwd packages/pods build",
 		"dev": "concurrently --names \"ai,agent,coding-agent,mom,web-ui,tui\" --prefix-colors \"cyan,yellow,red,white,green,magenta\" \"bun run --cwd packages/ai dev\" \"bun run --cwd packages/agent dev\" \"bun run --cwd packages/coding-agent dev\" \"bun run --cwd packages/mom dev\" \"bun run --cwd packages/web-ui dev\" \"bun run --cwd packages/tui dev\"",
 		"dev:tsc": "concurrently --names \"ai,web-ui\" --prefix-colors \"cyan,green\" \"bun run --cwd packages/ai dev:tsc\" \"bun run --cwd packages/web-ui dev:tsc\"",

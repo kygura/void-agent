@@ -47,12 +47,15 @@ describe("startup splash", () => {
 		expect(Math.max(...lines.map((line) => visibleWidth(stripAnsi(line))))).toBeLessThanOrEqual(MAX_WIDTH);
 	});
 
-	test("shows pyramid and background orbiter glyphs", () => {
+	test("shows crystal and background orbiter glyphs", () => {
 		resetSplashAnimation();
 		const frames = Array.from({ length: 20 }, (_, frame) =>
 			stripAnsi(renderSplash(60, 20, FIXED_TIME + frame * FRAME_INTERVAL_MS)),
 		).join("\n");
-		expect(frames).toMatch(/[.:=*#@]/);
+		// Upper and lower pyramid halves use distinct glyph ramps
+		expect(frames).toMatch(/[.:=*#%]/);
+		expect(frames).toMatch(/['\-~+x&]/);
+		expect(frames).not.toMatch(/@/);
 		expect(frames).toMatch(/[·oO]/);
 	});
 

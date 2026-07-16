@@ -21,25 +21,114 @@ const BACKGROUND_DEPTH_BIAS = 100;
 type Vec3 = { x: number; y: number; z: number };
 type Point = { x: number; y: number };
 type AxisSpring = { angle: number; velocity: number; target: number };
-type PaletteColor = "dim" | "muted" | "toolTitle" | "accent" | "warning" | "text";
 type Style = (text: string) => string;
 
-const PYRAMID_VERTICES: Vec3[] = [
-	{ x: 0, y: 1.3, z: 0 },
-	{ x: 1, y: -0.7, z: 1 },
-	{ x: -1, y: -0.7, z: 1 },
-	{ x: -1, y: -0.7, z: -1 },
-	{ x: 1, y: -0.7, z: -1 },
+type SplashPalette = {
+	bands: Array<{ hex: string; bold?: boolean }>;
+	spheres: [string, string, string];
+};
+
+// Curated splash palettes. Each is a coherent dark -> bright shading ramp:
+// bands map to the pyramid's six luminance levels, spheres to the background
+// orbiters. One palette is picked at random per splash (new/clear).
+// The amber ramp is the original Go void splash palette.
+const SPLASH_PALETTES: SplashPalette[] = [
+	{
+		// amber: ember -> rust -> soft red -> amber -> yellow -> pale highlight
+		bands: [
+			{ hex: "#6B4632" },
+			{ hex: "#A05A46" },
+			{ hex: "#C96A55" },
+			{ hex: "#FFB454" },
+			{ hex: "#E8C56E", bold: true },
+			{ hex: "#F5DFA0", bold: true },
+		],
+		spheres: ["#6B4632", "#8A5A46", "#A66A50"],
+	},
+	{
+		// green: moss -> leaf -> spring -> mint highlight
+		bands: [
+			{ hex: "#33502F" },
+			{ hex: "#4A7040" },
+			{ hex: "#5E9450" },
+			{ hex: "#7FCB6E" },
+			{ hex: "#A8E08A", bold: true },
+			{ hex: "#D9F5BE", bold: true },
+		],
+		spheres: ["#33502F", "#46663C", "#587F49"],
+	},
+	{
+		// blue: midnight -> steel -> sky -> ice highlight
+		bands: [
+			{ hex: "#2E3F5C" },
+			{ hex: "#3D5A80" },
+			{ hex: "#4F7CAC" },
+			{ hex: "#64A6E8" },
+			{ hex: "#98C9F0", bold: true },
+			{ hex: "#CFE7FA", bold: true },
+		],
+		spheres: ["#2E3F5C", "#3A5273", "#48688F"],
+	},
+	{
+		// red: maroon -> brick -> coral -> blush highlight
+		bands: [
+			{ hex: "#5C2A2A" },
+			{ hex: "#8A3A3A" },
+			{ hex: "#B54848" },
+			{ hex: "#E85E55" },
+			{ hex: "#F09080", bold: true },
+			{ hex: "#F8C8B8", bold: true },
+		],
+		spheres: ["#5C2A2A", "#763434", "#914040"],
+	},
+	{
+		// violet: plum -> orchid -> lavender highlight
+		bands: [
+			{ hex: "#443055" },
+			{ hex: "#5F4478" },
+			{ hex: "#7C58A0" },
+			{ hex: "#A97FE0" },
+			{ hex: "#C7A6F0", bold: true },
+			{ hex: "#E6D6FA", bold: true },
+		],
+		spheres: ["#443055", "#553D6A", "#684C82"],
+	},
 ];
 
-const PYRAMID_FACES: Array<[number, number, number]> = [
+function pickSplashPalette(): SplashPalette {
+	return SPLASH_PALETTES[Math.floor(Math.random() * SPLASH_PALETTES.length)] as SplashPalette;
+}
+
+let activePalette = pickSplashPalette();
+
+// Prism crystal: two pyramids stitched at a shared square base (a bipyramid).
+// Vertex 0 is the top apex, vertex 5 the bottom apex.
+const CRYSTAL_VERTICES: Vec3[] = [
+	{ x: 0, y: 1.3, z: 0 },
+	{ x: 1, y: 0, z: 1 },
+	{ x: -1, y: 0, z: 1 },
+	{ x: -1, y: 0, z: -1 },
+	{ x: 1, y: 0, z: -1 },
+	{ x: 0, y: -1.3, z: 0 },
+];
+
+const CRYSTAL_FACES: Array<[number, number, number]> = [
 	[0, 1, 2],
 	[0, 2, 3],
 	[0, 3, 4],
 	[0, 4, 1],
-	[1, 3, 2],
-	[1, 4, 3],
+	[5, 2, 1],
+	[5, 3, 2],
+	[5, 4, 3],
+	[5, 1, 4],
 ];
+
+const BOTTOM_APEX = 5;
+
+// Luminance ramps (dark -> bright). The lower pyramid uses a distinct glyph
+// family so the two halves of the crystal read differently.
+const UPPER_BAND_GLYPHS = [".", ":", "=", "*", "#", "%"];
+const LOWER_BAND_GLYPHS = ["'", "-", "~", "+", "x", "&"];
 
 const LIGHT_DIRECTION = normalize({ x: -0.3, y: 0.7, z: 0.75 });
 
@@ -105,13 +194,13 @@ export function fits(width: number, height: number): boolean {
 	return width >= MIN_WIDTH && height >= MIN_HEIGHT;
 }
 
-function styleFor(color: PaletteColor): Style {
-	try {
-		const ansi = theme.getFgAnsi(color);
-		return (text: string) => `${ansi}${text}\x1b[39m`;
-	} catch {
-		return (text: string) => text;
-	}
+function styleForHex(hex: string, bold = false): Style {
+	const r = Number.parseInt(hex.slice(1, 3), 16);
+	const g = Number.parseInt(hex.slice(3, 5), 16);
+	const b = Number.parseInt(hex.slice(5, 7), 16);
+	const open = `${bold ? "\x1b[1m" : ""}\x1b[38;2;${r};${g};${b}m`;
+	const close = `\x1b[39m${bold ? "\x1b[22m" : ""}`;
+	return (text: string) => `${open}${text}${close}`;
 }
 
 function wordmarkStyle(text: string): string {
@@ -298,17 +387,14 @@ export function renderSplash(
 	const centerX = (boxWidth - 1) / 2;
 	const centerY = (boxHeight - 1) / 2;
 	const scale = Math.min(boxWidth / 2 / (VIEW_RADIUS * 2), boxHeight / 2 / VIEW_RADIUS) * SCALE;
-	const vertices = PYRAMID_VERTICES.map((vertex) =>
+	const vertices = CRYSTAL_VERTICES.map((vertex) =>
 		rotateX(rotateZ(rotateY(rotateX(vertex, angleX), angleY), angleZ), MODEL_TILT),
 	);
 	const glyphs = Array<string>(boxWidth * boxHeight).fill(" ");
 	const styles = Array<number>(boxWidth * boxHeight).fill(0);
 	const depth = Array<number>(boxWidth * boxHeight).fill(Number.NEGATIVE_INFINITY);
-	const bandGlyphs = [".", ":", "=", "*", "#", "@"];
-	const paletteColors: PaletteColor[] = ["dim", "muted", "toolTitle", "accent", "warning", "text"];
-	const sphereColors: PaletteColor[] = ["dim", "muted", "toolTitle"];
-	const palette = paletteColors.map(styleFor);
-	const spherePalette = sphereColors.map(styleFor);
+	const palette = activePalette.bands.map((band) => styleForHex(band.hex, band.bold));
+	const spherePalette = activePalette.spheres.map((hex) => styleForHex(hex));
 
 	const seconds = now / 1000;
 	for (const sphere of BACKGROUND_SPHERES) {
@@ -332,7 +418,8 @@ export function renderSplash(
 		);
 	}
 
-	for (const face of PYRAMID_FACES) {
+	for (const face of CRYSTAL_FACES) {
+		const bandGlyphs = face.includes(BOTTOM_APEX) ? LOWER_BAND_GLYPHS : UPPER_BAND_GLYPHS;
 		const a = vertices[face[0]];
 		const b = vertices[face[1]];
 		const c = vertices[face[2]];
@@ -364,6 +451,15 @@ export function renderSplash(
 			]),
 		);
 	}
+
+	// Wordmark header, centered above the pyramid in the palette's signature color
+	const headerText = APP_NAME.toUpperCase().split("").join(" ");
+	if (headerText.length <= boxWidth) {
+		const pad = Math.floor((boxWidth - headerText.length) / 2);
+		const headerStyle = styleForHex(activePalette.bands[3]!.hex, true);
+		lines[1] = " ".repeat(pad) + headerStyle(headerText);
+	}
+
 	return lines.join("\n");
 }
 
@@ -380,6 +476,7 @@ export class SplashComponent implements Component {
 		private readonly ui: SplashUi,
 		private readonly fallbackWordmark: string = APP_NAME,
 	) {
+		activePalette = pickSplashPalette();
 		this.start();
 	}
 

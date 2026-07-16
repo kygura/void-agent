@@ -1,6 +1,7 @@
 import { getOAuthProviders } from "@void/ai/oauth";
 import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@void/tui";
 import { exec } from "child_process";
+import { copyToClipboard } from "../../../utils/clipboard.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { keyHint } from "./keybinding-hints.js";
@@ -15,6 +16,12 @@ export class LoginDialogComponent extends Container implements Focusable {
 	private abortController = new AbortController();
 	private inputResolver?: (value: string) => void;
 	private inputRejecter?: (error: Error) => void;
+	private authUrl?: string;
+	private copyFeedbackShown = false;
+	private inputAttached = false;
+
+	/** Called when the user asks to quit the app from the dialog */
+	public onExitApp?: () => void;
 
 	// Focusable implementation - propagate to input for IME cursor positioning
 	private _focused = false;
@@ -82,13 +89,15 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Called by onAuth callback - show URL and optional instructions
 	 */
 	showAuth(url: string, instructions?: string): void {
+		this.authUrl = url;
+		this.copyFeedbackShown = false;
 		this.contentContainer.clear();
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("accent", url), 1, 0));
 
 		const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
 		const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;
-		this.contentContainer.addChild(new Text(theme.fg("dim", hyperlink), 1, 0));
+		this.contentContainer.addChild(new Text(theme.fg("dim", `${hyperlink}, press c to copy url`), 1, 0));
 
 		if (instructions) {
 			this.contentContainer.addChild(new Spacer(1));
@@ -103,19 +112,39 @@ export class LoginDialogComponent extends Container implements Focusable {
 	}
 
 	/**
-	 * Show input for manual code/URL entry (for callback server providers)
+	 * Show input for manual code/URL entry (for callback server providers).
+	 * The textbox is opt-in: it only mounts when the user presses Enter, so
+	 * plain-letter shortcuts (like "c" to copy the URL) keep working while the
+	 * browser-callback flow completes on its own.
 	 */
 	showManualInput(prompt: string): Promise<string> {
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
-		this.contentContainer.addChild(this.input);
-		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to cancel")})`, 1, 0));
+		this.contentContainer.addChild(
+			new Text(theme.fg("dim", "press c to copy url, enter to paste it manually, esc to cancel, q to quit"), 1, 0),
+		);
 		this.tui.requestRender();
 
 		return new Promise((resolve, reject) => {
 			this.inputResolver = resolve;
 			this.inputRejecter = reject;
 		});
+	}
+
+	private mountManualInput(): void {
+		if (this.inputAttached) return;
+		this.inputAttached = true;
+		this.input.setValue("");
+		this.contentContainer.addChild(this.input);
+		this.contentContainer.addChild(
+			new Text(
+				`(${keyHint("tui.select.cancel", "to cancel,")} ${keyHint("tui.select.confirm", "to submit")})`,
+				1,
+				0,
+			),
+		);
+		this.input.focused = this._focused;
+		this.tui.requestRender();
 	}
 
 	/**
@@ -138,6 +167,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 		);
 
 		this.input.setValue("");
+		this.inputAttached = true;
 		this.tui.requestRender();
 
 		return new Promise((resolve, reject) => {
@@ -169,6 +199,35 @@ export class LoginDialogComponent extends Container implements Focusable {
 
 		if (kb.matches(data, "tui.select.cancel")) {
 			this.cancel();
+			return;
+		}
+
+		if (!this.inputAttached) {
+			// No textbox capturing keys: plain-letter shortcuts are safe here
+			if (data === "c" && this.authUrl) {
+				void copyToClipboard(this.authUrl);
+				if (!this.copyFeedbackShown) {
+					this.copyFeedbackShown = true;
+					this.contentContainer.addChild(new Text(theme.fg("dim", "URL copied to clipboard"), 1, 0));
+				}
+				this.tui.requestRender();
+				return;
+			}
+			if (data === "q" || kb.matches(data, "app.exit")) {
+				this.cancel();
+				this.onExitApp?.();
+				return;
+			}
+			if (this.inputResolver && kb.matches(data, "tui.select.confirm")) {
+				this.mountManualInput();
+			}
+			return;
+		}
+
+		// Exit chord still works from an empty textbox (mirrors editor behavior)
+		if (kb.matches(data, "app.exit") && this.input.getValue().length === 0) {
+			this.cancel();
+			this.onExitApp?.();
 			return;
 		}
 
