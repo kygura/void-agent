@@ -1,5 +1,5 @@
 {
-  "name": "pi-extension-custom-provider-qwen-cli",
+  "name": "void-extension-custom-provider-qwen-cli",
   "private": true,
   "version": "1.15.2",
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "echo 'nothing to build'",
     "check": "echo 'nothing to check'"
   },
-  "pi": {
+  "void": {
     "extensions": [
       "./index.ts"
     ]

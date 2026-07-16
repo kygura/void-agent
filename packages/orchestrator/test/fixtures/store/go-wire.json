@@ -1,0 +1,5 @@
+{"meta":{"id":"session-fixture","provider":"mock","created":"2026-07-15T12:34:56.123456789Z"}}
+{"runId":"run-1","prompt":"inspect the store"}
+{"runId":"run-1","event":{"kind":"tool","providerSessionId":"provider-42","text":"complete","tool":"read","detail":"store.ts","done":true,"isError":true,"usage":{"inputTokens":7,"outputTokens":11,"costUsd":0.125},"exitCode":2,"childSessionId":"child-1","childName":"worker","state":"done","elapsed":1500000001}}
+{"runId":"run-2","event":{"kind":"exit","usage":{}}}
+{"meta":{"id":"session-fixture","provider":"mock","providerSessionId":"provider-42","name":"fixture","parentSessionId":"parent-1","created":"2026-07-15T12:34:56.123456789Z"}}

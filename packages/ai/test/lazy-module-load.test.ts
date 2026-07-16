@@ -92,7 +92,8 @@ describe("lazy provider module loading", () => {
 
 	it("loads only the Anthropic SDK when dispatching through streamSimple", () => {
 		const result = runProbe(`
-			const model = mod.getModel("anthropic", "claude-sonnet-4-20250514");
+			const [model] = mod.getModels("anthropic");
+			if (!model) throw new Error("Anthropic model registry is empty");
 			const context = { messages: [{ role: "user", content: "hi" }] };
 			await mod.streamSimple(model, context).result();
 		`);

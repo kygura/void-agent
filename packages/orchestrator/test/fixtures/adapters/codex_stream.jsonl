@@ -1,0 +1,8 @@
+{"type":"SessionConfigured","session_id":"codex-sess-1","model":"gpt-5-codex"}
+{"type":"AgentReasoning","text":"thinking about it"}
+{"type":"ExecCommandBegin","call_id":"c1","command":"ls -la","cwd":"/tmp"}
+{"type":"ExecCommandEnd","call_id":"c1","exit_code":0}
+{"type":"AgentMessage","message":"Here is the result"}
+{"type":"ThreadItemUnknownFuture","foo":"bar"}
+totally not json either
+{"type":"TaskComplete","last_agent_message":"Here is the result"}

@@ -7,6 +7,10 @@
 - Fixed bare `readline` import to use `node:readline` prefix for Deno compatibility ([#2885](https://github.com/badlogic/pi-mono/issues/2885) by [@milosv-vtool](https://github.com/milosv-vtool))
 - Fixed auto-retry to treat stream failures like `request ended without sending any chunks` as transient errors ([#2892](https://github.com/badlogic/pi-mono/issues/2892))
 
+### Added
+
+- Added the built-in `void` child orchestration extension with Provider selection, concurrent spawn, resume, cancellation, model and effort controls, and the `/agents` view.
+
 ## [0.65.2] - 2026-04-06
 
 ## [0.65.1] - 2026-04-05

@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { type Message, type Model, streamSimple } from "@mariozechner/pi-ai";
+import { Agent, type AgentMessage, type ThinkingLevel } from "@void/agent";
+import { type Message, type Model, streamSimple } from "@void/ai";
 import { getAgentDir, getDocsPath } from "../config.js";
 import { AgentSession } from "./agent-session.js";
 import { AuthStorage } from "./auth-storage.js";
@@ -43,7 +43,7 @@ import {
 	createSubagentOutputToolDefinition,
 	createSubagentToolDefinition,
 	resolveAgentTools,
-	type SpawnPiChild,
+	type SpawnVoidChild,
 	SubagentRegistry,
 } from "./tools/subagent.js";
 
@@ -53,7 +53,7 @@ const MAX_SUBAGENT_DEPTH = 5;
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
 	cwd?: string;
-	/** Global config directory. Default: ~/.pi/agent */
+	/** Global config directory. Default: ~/.void */
 	agentDir?: string;
 
 	/** Auth storage for credentials. Default: AuthStorage.create(agentDir/auth.json) */
@@ -160,7 +160,7 @@ function getDefaultAgentDir(): string {
  * const { session } = await createAgentSession();
  *
  * // With explicit model
- * import { getModel } from '@mariozechner/pi-ai';
+ * import { getModel } from '@void/ai';
  * const { session } = await createAgentSession({
  *   model: getModel('anthropic', 'claude-opus-4-5'),
  *   thinkingLevel: 'high',
@@ -285,7 +285,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		if (!options.harnessRunManager) {
 			for (const harness of createDefaultHarnesses()) harnessRunManager.registerHarness(harness);
 		}
-		const spawnPiChild: SpawnPiChild = async (childConfig) => {
+		const spawnVoidChild: SpawnVoidChild = async (childConfig) => {
 			const childModel = childConfig.modelId
 				? (findExactModelReferenceMatch(childConfig.modelId, modelRegistry.getAll()) ?? model)
 				: model;
@@ -315,7 +315,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			harnessRunManager,
 			registry: subagentRegistry,
 			parentSessionRef,
-			spawnPiChild,
+			spawnVoidChild,
 		});
 		subagentOutputTool = createSubagentOutputToolDefinition(subagentRegistry);
 	}

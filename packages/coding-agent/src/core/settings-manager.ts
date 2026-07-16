@@ -1,4 +1,5 @@
-import type { Transport } from "@mariozechner/pi-ai";
+import type { Transport } from "@void/ai";
+import type { OrchestratorConfig } from "@void/orchestrator";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
@@ -99,6 +100,7 @@ export interface Settings {
 	statusLine?: string[]; // Ordered list of kebab-case footer item ids (see status-line.ts catalog). Unset = default footer.
 	statusLineSeparator?: string; // default: " · "
 	sidebar?: boolean; // default: true - show the session sidebar pane when terminal width >= 120
+	orchestrator?: OrchestratorConfig; // Child coding-agent CLI Providers; separate from the parent defaultProvider/defaultModel.
 }
 
 /** Deep merge settings: overlay takes precedence, nested objects merge recursively */
@@ -202,7 +204,7 @@ export class InMemorySettingsStorage implements SettingsStorage {
 }
 
 export interface SettingsManagerCreateOptions {
-	/** Named profile layered between global and project settings (~/.pi/agent/profiles/<name>.json) */
+	/** Named profile layered between global and project settings (~/.void/profiles/<name>.json) */
 	profile?: string;
 	/** Highest-precedence in-memory overrides, e.g. built from repeated `-c key.path=value` CLI flags */
 	cliOverrides?: Record<string, unknown>;
@@ -572,6 +574,10 @@ export class SettingsManager {
 		return this.settings.defaultProvider;
 	}
 
+	getOrchestratorSettings(): OrchestratorConfig | undefined {
+		return this.settings.orchestrator === undefined ? undefined : structuredClone(this.settings.orchestrator);
+	}
+
 	getDefaultModel(): string | undefined {
 		return this.settings.defaultModel;
 	}
@@ -885,7 +891,7 @@ export class SettingsManager {
 		if (this.settings.terminal?.clearOnShrink !== undefined) {
 			return this.settings.terminal.clearOnShrink;
 		}
-		return process.env.PI_CLEAR_ON_SHRINK === "1";
+		return process.env.VOID_CLEAR_ON_SHRINK === "1";
 	}
 
 	setClearOnShrink(enabled: boolean): void {
@@ -956,7 +962,7 @@ export class SettingsManager {
 	}
 
 	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
+		return this.settings.showHardwareCursor ?? process.env.VOID_HARDWARE_CURSOR === "1";
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {

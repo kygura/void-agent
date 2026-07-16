@@ -7,8 +7,8 @@
 
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { type ImageContent, modelsAreEqual, supportsXhigh } from "@mariozechner/pi-ai";
-import { ProcessTerminal, setKeybindings, TUI } from "@mariozechner/pi-tui";
+import { type ImageContent, modelsAreEqual, supportsXhigh } from "@void/ai";
+import { ProcessTerminal, setKeybindings, TUI } from "@void/tui";
 import chalk from "chalk";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.js";
 import { processFileArguments } from "./cli/file-processor.js";
@@ -28,6 +28,7 @@ import { KeybindingsManager } from "./core/keybindings.js";
 import { buildConfigOverrides } from "./core/merge-config.js";
 import type { ModelRegistry } from "./core/model-registry.js";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.js";
+import { ProcessLifetimeOrchestrationHost } from "./core/orchestration/index.js";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.js";
 import type { CreateAgentSessionOptions } from "./core/sdk.js";
 import {
@@ -421,10 +422,10 @@ async function promptForMissingSessionCwd(
 
 export async function main(args: string[]) {
 	resetTimings();
-	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.PI_OFFLINE);
+	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.VOID_OFFLINE);
 	if (offlineMode) {
-		process.env.PI_OFFLINE = "1";
-		process.env.PI_SKIP_VERSION_CHECK = "1";
+		process.env.VOID_OFFLINE = "1";
+		process.env.VOID_SKIP_VERSION_CHECK = "1";
 	}
 
 	if (await handlePackageCommand(args)) {
@@ -521,6 +522,7 @@ export async function main(args: string[]) {
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
 	const authStorage = AuthStorage.create();
+	const orchestrationHost = new ProcessLifetimeOrchestrationHost();
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 		cwd,
 		agentDir,
@@ -531,6 +533,7 @@ export async function main(args: string[]) {
 			cwd,
 			agentDir,
 			authStorage,
+			orchestrationHost,
 			extensionFlagValues: parsed.unknownFlags,
 			settingsProfile: parsed.profile,
 			settingsCliOverrides: cliOverrides,
@@ -618,6 +621,7 @@ export async function main(args: string[]) {
 		cwd: sessionManager.getCwd(),
 		agentDir,
 		sessionManager,
+		applicationShutdown: () => orchestrationHost.close(),
 	});
 	const { services, session, modelFallbackMessage } = runtime;
 	const { settingsManager, modelRegistry, resourceLoader } = services;
@@ -627,12 +631,14 @@ export async function main(args: string[]) {
 			.getExtensions()
 			.extensions.flatMap((extension) => Array.from(extension.flags.values()));
 		printHelp(extensionFlags);
+		await runtime.dispose();
 		process.exit(0);
 	}
 
 	if (parsed.listModels !== undefined) {
 		const searchPattern = typeof parsed.listModels === "string" ? parsed.listModels : undefined;
 		await listModels(modelRegistry, searchPattern);
+		await runtime.dispose();
 		process.exit(0);
 	}
 
@@ -664,6 +670,7 @@ export async function main(args: string[]) {
 	time("resolveModelScope");
 	reportDiagnostics(runtime.diagnostics);
 	if (runtime.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
+		await runtime.dispose();
 		process.exit(1);
 	}
 	time("createAgentSession");
@@ -673,12 +680,14 @@ export async function main(args: string[]) {
 		console.error(chalk.yellow("\nSet an API key environment variable:"));
 		console.error("  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.");
 		console.error(chalk.yellow(`\nOr create ${getModelsPath()}`));
+		await runtime.dispose();
 		process.exit(1);
 	}
 
-	const startupBenchmark = isTruthyEnvFlag(process.env.PI_STARTUP_BENCHMARK);
+	const startupBenchmark = isTruthyEnvFlag(process.env.VOID_STARTUP_BENCHMARK);
 	if (startupBenchmark && appMode !== "interactive") {
-		console.error(chalk.red("Error: PI_STARTUP_BENCHMARK only supports interactive mode"));
+		console.error(chalk.red("Error: VOID_STARTUP_BENCHMARK only supports interactive mode"));
+		await runtime.dispose();
 		process.exit(1);
 	}
 
@@ -709,6 +718,7 @@ export async function main(args: string[]) {
 			time("interactiveMode.init");
 			printTimings();
 			interactiveMode.stop();
+			await runtime.dispose();
 			stopThemeWatcher();
 			if (process.stdout.writableLength > 0) {
 				await new Promise<void>((resolve) => process.stdout.once("drain", resolve));

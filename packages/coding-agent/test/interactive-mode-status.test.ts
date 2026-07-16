@@ -1,4 +1,4 @@
-import { Container } from "@mariozechner/pi-tui";
+import { type CombinedAutocompleteProvider, Container } from "@void/tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
@@ -181,5 +181,53 @@ describe("InteractiveMode.showLoadedResources", () => {
 		const output = renderAll(fakeThis.chatContainer);
 		expect(output).toContain("[Skill conflicts]");
 		expect(output).not.toContain("[Skills]");
+	});
+});
+
+describe("InteractiveMode command autocomplete", () => {
+	test("merges argument completions from an extension command colliding with /login", async () => {
+		let autocompleteProvider: CombinedAutocompleteProvider | undefined;
+		const defaultEditor = {
+			setAutocompleteProvider: (provider: CombinedAutocompleteProvider) => {
+				autocompleteProvider = provider;
+			},
+		};
+		const session = {
+			scopedModels: [],
+			modelRegistry: { getAvailable: () => [] },
+			promptTemplates: [],
+			extensionRunner: {
+				getRegisteredCommands: () => [
+					{
+						name: "login",
+						invocationName: "login",
+						description: "child CLI login",
+						sourceInfo: { path: "builtin:void", scope: "project", source: "local" },
+						getArgumentCompletions: (prefix: string) =>
+							"mock".startsWith(prefix) ? [{ value: "mock", label: "mock" }] : null,
+					},
+				],
+			},
+			resourceLoader: { getSkills: () => ({ skills: [] }) },
+			settingsManager: { getEnableSkillCommands: () => false },
+			sessionManager: { getCwd: () => "/tmp" },
+		};
+		const mode = Object.assign(Object.create(InteractiveMode.prototype) as object, {
+			runtimeHost: { session },
+			defaultEditor,
+			editor: defaultEditor,
+			skillCommands: new Map(),
+		});
+		const setupAutocomplete = Reflect.get(InteractiveMode.prototype, "setupAutocomplete") as (
+			this: object,
+			fdPath: string | undefined,
+		) => void;
+		setupAutocomplete.call(mode, undefined);
+
+		const input = "/login mo";
+		const suggestions = await autocompleteProvider?.getSuggestions([input], 0, input.length, {
+			signal: new AbortController().signal,
+		});
+		expect(suggestions?.items).toEqual([expect.objectContaining({ value: "mock" })]);
 	});
 });

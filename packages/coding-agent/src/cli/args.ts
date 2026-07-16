@@ -2,7 +2,7 @@
  * CLI argument parsing and help display
  */
 
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { ThinkingLevel } from "@void/agent";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR } from "../config.js";
 import type { ExtensionFlag } from "../core/extensions/types.js";
@@ -255,14 +255,14 @@ ${chalk.bold("Options:")}
   --no-prompt-templates, -np     Disable prompt template discovery and loading
   --theme <path>                 Load a theme file or directory (can be used multiple times)
   --no-themes                    Disable theme discovery and loading
-  --profile <name>               Layer settings from ~/${CONFIG_DIR_NAME}/agent/profiles/<name>.json
+  --profile <name>               Layer settings from ~/${CONFIG_DIR_NAME}/profiles/<name>.json
                                  (precedence: global < profile < project < --config)
   --config <key.path=value>      Override a settings key (dotted path, can be used multiple times)
                                  Value is parsed as JSON, falling back to a raw string
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup (overrides quietStartup setting)
-  --offline                      Disable startup network operations (same as PI_OFFLINE=1)
+  --offline                      Disable startup network operations (same as VOID_OFFLINE=1)
   --help, -h                     Show this help
   --version, -v                  Show version number
 
@@ -312,7 +312,7 @@ ${chalk.bold("Examples:")}
   ${APP_NAME} --tools read,grep,find,ls -p "Review the code in src/"
 
   # Export a session file to HTML
-  ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl
+  ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/sessions/--path--/session.jsonl
   ${APP_NAME} --export session.jsonl output.html
 
 ${chalk.bold("Environment Variables:")}
@@ -340,11 +340,11 @@ ${chalk.bold("Environment Variables:")}
   AWS_SECRET_ACCESS_KEY            - AWS secret key for Amazon Bedrock
   AWS_BEARER_TOKEN_BEDROCK         - Bedrock API key (bearer token)
   AWS_REGION                       - AWS region for Amazon Bedrock (e.g., us-east-1)
-  ${ENV_AGENT_DIR.padEnd(32)} - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
-  PI_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
-  PI_OFFLINE                       - Disable startup network operations when set to 1/true/yes
-  PI_SHARE_VIEWER_URL              - Base URL for /share command (default: https://pi.dev/session/)
-  PI_AI_ANTIGRAVITY_VERSION        - Override Antigravity User-Agent version (e.g., 1.23.0)
+  ${ENV_AGENT_DIR.padEnd(32)} - Global config directory (default: ~/${CONFIG_DIR_NAME})
+  VOID_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
+  VOID_OFFLINE                       - Disable startup network operations when set to 1/true/yes
+  VOID_SHARE_VIEWER_URL              - Base URL for /share command (default: https://pi.dev/session/)
+  VOID_AI_ANTIGRAVITY_VERSION        - Override Antigravity User-Agent version (e.g., 1.23.0)
 
 ${chalk.bold("Available Tools (default: read, bash, edit, write):")}
   read   - Read file contents

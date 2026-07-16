@@ -140,10 +140,11 @@ function readClipboardImageViaWlPaste(): ClipboardImage | null {
 	return { bytes: data.stdout, mimeType: baseMimeType(selectedType) };
 }
 
-function isWSL(env: NodeJS.ProcessEnv = process.env): boolean {
+function isWSL(env: NodeJS.ProcessEnv = process.env, inspectKernel = true): boolean {
 	if (env.WSL_DISTRO_NAME || env.WSLENV) {
 		return true;
 	}
+	if (!inspectKernel) return false;
 
 	try {
 		const release = readFileSync("/proc/version", "utf-8");
@@ -175,14 +176,14 @@ function readClipboardImageViaPowerShell(): ClipboardImage | null {
 		const psScript = [
 			"Add-Type -AssemblyName System.Windows.Forms",
 			"Add-Type -AssemblyName System.Drawing",
-			"$path = $env:PI_WSL_CLIPBOARD_IMAGE_PATH",
+			"$path = $env:VOID_WSL_CLIPBOARD_IMAGE_PATH",
 			"$img = [System.Windows.Forms.Clipboard]::GetImage()",
 			"if ($img) { $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' } else { Write-Output 'empty' }",
 		].join("; ");
 
 		const result = runCommand("powershell.exe", ["-NoProfile", "-Command", psScript], {
 			timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
-			env: { ...process.env, PI_WSL_CLIPBOARD_IMAGE_PATH: winPath },
+			env: { ...process.env, VOID_WSL_CLIPBOARD_IMAGE_PATH: winPath },
 		});
 		if (!result.ok) {
 			return null;
@@ -265,7 +266,7 @@ export async function readClipboardImage(options?: {
 	let image: ClipboardImage | null = null;
 
 	if (platform === "linux") {
-		const wsl = isWSL(env);
+		const wsl = isWSL(env, options?.env === undefined);
 		const wayland = isWaylandSession(env);
 
 		if (wayland || wsl) {

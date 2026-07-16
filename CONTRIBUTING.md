@@ -1,4 +1,4 @@
-# Contributing to pi
+# Contributing to void
 
 Thanks for wanting to contribute! This guide exists to save both of us time.
 
@@ -25,7 +25,7 @@ This exists because AI makes it trivial to generate plausible-looking but low-qu
 ## Before Submitting a PR
 
 ```bash
-npm run check  # must pass with no errors
+bun run check  # must pass with no errors
 ./test.sh      # must pass
 ```
 
@@ -35,7 +35,7 @@ If you're adding a new provider to `packages/ai`, see `AGENTS.md` for required t
 
 ## Philosophy
 
-pi's core is minimal. If your feature doesn't belong in the core, it should be an extension. PRs that bloat the core will likely be rejected.
+void's core is minimal. If your feature doesn't belong in the core, it should be an extension. PRs that bloat the core will likely be rejected.
 
 ## Questions?
 

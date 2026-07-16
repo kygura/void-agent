@@ -16,41 +16,41 @@ const __dirname = dirname(__filename);
 const packageJson = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
 
 function printHelp() {
-	console.log(`pi v${packageJson.version} - Manage vLLM deployments on GPU pods
+	console.log(`void v${packageJson.version} - Manage vLLM deployments on GPU pods
 
 Pod Management:
-  pi pods setup <name> "<ssh>" --mount "<mount>"    Setup pod with mount command
+  void pods setup <name> "<ssh>" --mount "<mount>"    Setup pod with mount command
     Options:
       --vllm release    Install latest vLLM release >=0.10.0 (default)
       --vllm nightly    Install vLLM nightly build (latest features)
       --vllm gpt-oss    Install vLLM 0.10.1+gptoss with PyTorch nightly (GPT-OSS only)
-  pi pods                                           List all pods (* = active)
-  pi pods active <name>                             Switch active pod
-  pi pods remove <name>                             Remove pod from local config
-  pi shell [<name>]                                 Open shell on pod (active or specified)
-  pi ssh [<name>] "<command>"                       Run SSH command on pod
+  void pods                                           List all pods (* = active)
+  void pods active <name>                             Switch active pod
+  void pods remove <name>                             Remove pod from local config
+  void shell [<name>]                                 Open shell on pod (active or specified)
+  void ssh [<name>] "<command>"                       Run SSH command on pod
 
 Model Management:
-  pi start <model> --name <name> [options]          Start a model
+  void start <model> --name <name> [options]          Start a model
     --memory <percent>   GPU memory allocation (30%, 50%, 90%)
     --context <size>     Context window (4k, 8k, 16k, 32k, 64k, 128k)
     --gpus <count>       Number of GPUs to use (predefined models only)
     --vllm <args...>     Pass remaining args to vLLM (ignores other options)
-  pi stop [<name>]                                  Stop model (or all if no name)
-  pi list                                           List running models
-  pi logs <name>                                    Stream model logs
-  pi agent <name> ["<message>"...] [options]        Chat with model using agent & tools
-  pi agent <name> [options]                         Interactive chat mode
+  void stop [<name>]                                  Stop model (or all if no name)
+  void list                                           List running models
+  void logs <name>                                    Stream model logs
+  void agent <name> ["<message>"...] [options]        Chat with model using agent & tools
+  void agent <name> [options]                         Interactive chat mode
     --continue, -c       Continue previous session
     --json              Output as JSONL
-    (All pi-agent options are supported)
+    (All void-agent options are supported)
 
   All model commands support --pod <name> to override the active pod.
 
 Environment:
   HF_TOKEN         HuggingFace token for model downloads
-  PI_API_KEY     API key for vLLM endpoints
-  PI_CONFIG_DIR    Config directory (default: ~/.pi)`);
+  VOID_API_KEY     API key for vLLM endpoints
+  VOID_CONFIG_DIR    Config directory (default: ~/.void)`);
 }
 
 // Parse command line arguments
@@ -71,19 +71,19 @@ const subcommand = args[1];
 
 // Main command handler
 try {
-	// Handle "pi pods" commands
+	// Handle "void pods" commands
 	if (command === "pods") {
 		if (!subcommand) {
-			// pi pods - list all pods
+			// void pods - list all pods
 			listPods();
 		} else if (subcommand === "setup") {
-			// pi pods setup <name> "<ssh>" [--mount "<mount>"] [--models-path <path>] [--vllm release|nightly|gpt-oss]
+			// void pods setup <name> "<ssh>" [--mount "<mount>"] [--models-path <path>] [--vllm release|nightly|gpt-oss]
 			const name = args[2];
 			const sshCmd = args[3];
 
 			if (!name || !sshCmd) {
 				console.error(
-					'Usage: pi pods setup <name> "<ssh>" [--mount "<mount>"] [--models-path <path>] [--vllm release|nightly|gpt-oss]',
+					'Usage: void pods setup <name> "<ssh>" [--mount "<mount>"] [--models-path <path>] [--vllm release|nightly|gpt-oss]',
 				);
 				process.exit(1);
 			}
@@ -122,18 +122,18 @@ try {
 
 			await setupPod(name, sshCmd, options);
 		} else if (subcommand === "active") {
-			// pi pods active <name>
+			// void pods active <name>
 			const name = args[2];
 			if (!name) {
-				console.error("Usage: pi pods active <name>");
+				console.error("Usage: void pods active <name>");
 				process.exit(1);
 			}
 			switchActivePod(name);
 		} else if (subcommand === "remove") {
-			// pi pods remove <name>
+			// void pods remove <name>
 			const name = args[2];
 			if (!name) {
-				console.error("Usage: pi pods remove <name>");
+				console.error("Usage: void pods remove <name>");
 				process.exit(1);
 			}
 			removePodCommand(name);
@@ -154,7 +154,7 @@ try {
 		// Handle SSH/shell commands and model commands
 		switch (command) {
 			case "shell": {
-				// pi shell [<name>] - open interactive shell
+				// void shell [<name>] - open interactive shell
 				const podName = args[1];
 				let podInfo: { name: string; pod: import("./types.js").Pod } | null = null;
 
@@ -172,7 +172,7 @@ try {
 					if (podName) {
 						console.error(chalk.red(`Pod '${podName}' not found`));
 					} else {
-						console.error(chalk.red("No active pod. Use 'pi pods active <name>' to set one."));
+						console.error(chalk.red("No active pod. Use 'void pods active <name>' to set one."));
 					}
 					process.exit(1);
 				}
@@ -192,19 +192,19 @@ try {
 				break;
 			}
 			case "ssh": {
-				// pi ssh [<name>] "<command>" - run command via SSH
+				// void ssh [<name>] "<command>" - run command via SSH
 				let podName: string | undefined;
 				let sshCommand: string;
 
 				if (args.length === 2) {
-					// pi ssh "<command>" - use active pod
+					// void ssh "<command>" - use active pod
 					sshCommand = args[1];
 				} else if (args.length === 3) {
-					// pi ssh <name> "<command>"
+					// void ssh <name> "<command>"
 					podName = args[1];
 					sshCommand = args[2];
 				} else {
-					console.error('Usage: pi ssh [<name>] "<command>"');
+					console.error('Usage: void ssh [<name>] "<command>"');
 					process.exit(1);
 				}
 
@@ -224,7 +224,7 @@ try {
 					if (podName) {
 						console.error(chalk.red(`Pod '${podName}' not found`));
 					} else {
-						console.error(chalk.red("No active pod. Use 'pi pods active <name>' to set one."));
+						console.error(chalk.red("No active pod. Use 'void pods active <name>' to set one."));
 					}
 					process.exit(1);
 				}
@@ -237,7 +237,7 @@ try {
 				break;
 			}
 			case "start": {
-				// pi start <model> --name <name> [options]
+				// void start <model> --name <name> [options]
 				const modelId = args[1];
 				if (!modelId) {
 					// Show available models
@@ -301,7 +301,7 @@ try {
 				break;
 			}
 			case "stop": {
-				// pi stop [name] - stop specific model or all models
+				// void stop [name] - stop specific model or all models
 				const name = args[1];
 				if (!name) {
 					// Stop all models on the active pod
@@ -312,28 +312,28 @@ try {
 				break;
 			}
 			case "list":
-				// pi list
+				// void list
 				await listModels({ pod: podOverride });
 				break;
 			case "logs": {
-				// pi logs <name>
+				// void logs <name>
 				const name = args[1];
 				if (!name) {
-					console.error("Usage: pi logs <name>");
+					console.error("Usage: void logs <name>");
 					process.exit(1);
 				}
 				await viewLogs(name, { pod: podOverride });
 				break;
 			}
 			case "agent": {
-				// pi agent <name> [messages...] [options]
+				// void agent <name> [messages...] [options]
 				const name = args[1];
 				if (!name) {
-					console.error("Usage: pi agent <name> [messages...] [options]");
+					console.error("Usage: void agent <name> [messages...] [options]");
 					process.exit(1);
 				}
 
-				const apiKey = process.env.PI_API_KEY;
+				const apiKey = process.env.VOID_API_KEY;
 
 				// Pass all args after the model name
 				const agentArgs = args.slice(2);

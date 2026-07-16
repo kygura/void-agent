@@ -12,16 +12,16 @@ const distCliPath = join(packageDir, "dist", "cli.js");
 const srcCliPath = join(packageDir, "src", "cli.ts");
 const defaultNodeProfileDir = join(repoRoot, "profiles-node");
 const defaultBunProfileDir = join(repoRoot, "profiles-bun");
-const agentDirEnvName = "PI_CODING_AGENT_DIR";
-const startupBenchmarkEnvName = "PI_STARTUP_BENCHMARK";
+const agentDirEnvName = "VOID_CODING_AGENT_DIR";
+const startupBenchmarkEnvName = "VOID_STARTUP_BENCHMARK";
 
 function printHelp() {
 	console.log(`Usage:
   node scripts/profile-coding-agent-node.mjs [options]
 
 Profiles coding-agent startup with the runtime selected below:
-- npm run profile:tui     -> builds packages/coding-agent and profiles TUI startup with Node
-- npm run profile:rpc     -> builds packages/coding-agent and profiles RPC startup with Node
+- bun run profile:tui     -> builds packages/coding-agent and profiles TUI startup with Node
+- bun run profile:rpc     -> builds packages/coding-agent and profiles RPC startup with Node
 - bun run profile:tui     -> profiles TUI startup from src/cli.ts directly with Bun
 - bun run profile:rpc     -> profiles RPC startup from src/cli.ts directly with Bun
 
@@ -33,9 +33,9 @@ Options:
                          Default: profiles-node for Node, profiles-bun for Bun
   --label <name>         Profile name prefix (default: <mode>-startup)
   --runtime <name>       node, bun, or auto (default: auto)
-  --agent-dir <dir>      Use a specific PI_CODING_AGENT_DIR for the benchmark run
+  --agent-dir <dir>      Use a specific VOID_CODING_AGENT_DIR for the benchmark run
   --isolated-agent-dir   Use a fresh temporary agent dir instead of the normal one
-  --no-offline           Do not force PI_OFFLINE=1 / PI_SKIP_VERSION_CHECK=1
+  --no-offline           Do not force VOID_OFFLINE=1 / VOID_SKIP_VERSION_CHECK=1
   --skip-build           Reuse the current dist/cli.js without rebuilding first (Node only)
   --cpu-profile          Write CPU profiles for benchmark runs
   --help                 Show this help
@@ -282,19 +282,8 @@ async function runBuild() {
 	process.stdout.write("Building packages/tui, packages/ai, packages/agent, and packages/coding-agent...\n");
 	const startedAt = performance.now();
 	const child = spawn(
-		"npm",
-		[
-			"run",
-			"build",
-			"--workspace",
-			"packages/tui",
-			"--workspace",
-			"packages/ai",
-			"--workspace",
-			"packages/agent",
-			"--workspace",
-			"packages/coding-agent",
-		],
+		"bun",
+		["run", "build"],
 		{
 			cwd: repoRoot,
 			env: process.env,
@@ -368,8 +357,8 @@ function createBenchmarkEnv(options, isolatedAgentDir) {
 		env[startupBenchmarkEnvName] = "1";
 	}
 	if (options.offline) {
-		env.PI_OFFLINE = "1";
-		env.PI_SKIP_VERSION_CHECK = "1";
+		env.VOID_OFFLINE = "1";
+		env.VOID_SKIP_VERSION_CHECK = "1";
 	}
 	return env;
 }
@@ -378,7 +367,7 @@ async function runTuiBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 	const runNumber = runIndex + 1;
 	const suffix = String(runNumber).padStart(3, "0");
 	const profileName = `${options.label}-${suffix}.cpuprofile`;
-	const tempRoot = options.isolatedAgentDir ? mkdtempSync(join(tmpdir(), "pi-startup-benchmark-")) : undefined;
+	const tempRoot = options.isolatedAgentDir ? mkdtempSync(join(tmpdir(), "void-startup-benchmark-")) : undefined;
 	const isolatedAgentDir = tempRoot ? join(tempRoot, "agent") : undefined;
 	if (isolatedAgentDir) {
 		mkdirSync(isolatedAgentDir, { recursive: true });
@@ -437,7 +426,7 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 	const runNumber = runIndex + 1;
 	const suffix = String(runNumber).padStart(3, "0");
 	const profileName = `${options.label}-${suffix}.cpuprofile`;
-	const tempRoot = options.isolatedAgentDir ? mkdtempSync(join(tmpdir(), "pi-startup-benchmark-")) : undefined;
+	const tempRoot = options.isolatedAgentDir ? mkdtempSync(join(tmpdir(), "void-startup-benchmark-")) : undefined;
 	const isolatedAgentDir = tempRoot ? join(tempRoot, "agent") : undefined;
 	if (isolatedAgentDir) {
 		mkdirSync(isolatedAgentDir, { recursive: true });

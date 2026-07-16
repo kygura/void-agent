@@ -18,7 +18,7 @@ Generate and execute pod_setup.sh via SSH
   - [ ] Generate pip install commands (torch, vLLM, etc.)
   - [ ] Handle model-specific vLLM versions (e.g., gpt-oss needs 0.10.1+gptoss)
   - [ ] Generate mount commands if --mount provided
-  - [ ] Generate env var setup (HF_TOKEN, PI_API_KEY)
+  - [ ] Generate env var setup (HF_TOKEN, VOID_API_KEY)
 
 - [ ] `src/setup/detect-hardware.ts` - Run nvidia-smi and parse GPU info
   - [ ] Execute nvidia-smi via SSH
@@ -40,7 +40,7 @@ Local JSON state management
   - [ ] Model interface (model, port, gpu, pid)
   - [ ] GPU interface (id, name, memory)
 
-- [ ] `src/config/store.ts` - Read/write ~/.pi/pods.json
+- [ ] `src/config/store.ts` - Read/write ~/.void/pods.json
   - [ ] Load config (handle missing file)
   - [ ] Save config (atomic write)
   - [ ] Get active pod
@@ -60,21 +60,21 @@ Clean SSH command execution
 ## Package 4: Pod Commands
 Pod management CLI commands
 
-- [ ] `src/commands/pods-setup.ts` - pi pods setup
+- [ ] `src/commands/pods-setup.ts` - void pods setup
   - [ ] Parse args (name, ssh, mount)
-  - [ ] Check env vars (HF_TOKEN, PI_API_KEY)
+  - [ ] Check env vars (HF_TOKEN, VOID_API_KEY)
   - [ ] Call setup executor
   - [ ] Save pod to config
 
-- [ ] `src/commands/pods-list.ts` - pi pods
+- [ ] `src/commands/pods-list.ts` - void pods
   - [ ] Load config
   - [ ] Display all pods with active marker
 
-- [ ] `src/commands/pods-active.ts` - pi pods active
+- [ ] `src/commands/pods-active.ts` - void pods active
   - [ ] Switch active pod
   - [ ] Update config
 
-- [ ] `src/commands/pods-remove.ts` - pi pods remove
+- [ ] `src/commands/pods-remove.ts` - void pods remove
   - [ ] Remove from config (not remote)
 
 ## Package 5: Model Management
@@ -100,7 +100,7 @@ Model lifecycle management
 ## Package 6: Model Commands
 Model management CLI commands
 
-- [ ] `src/commands/start.ts` - pi start
+- [ ] `src/commands/start.ts` - void start
   - [ ] Parse model and args
   - [ ] Find next available port
   - [ ] Select GPU (round-robin)
@@ -109,16 +109,16 @@ Model management CLI commands
   - [ ] Wait for health check
   - [ ] Update config on success
 
-- [ ] `src/commands/stop.ts` - pi stop
+- [ ] `src/commands/stop.ts` - void stop
   - [ ] Find model in config
   - [ ] Kill process via PID
   - [ ] Clean up config
 
-- [ ] `src/commands/list.ts` - pi list
+- [ ] `src/commands/list.ts` - void list
   - [ ] Show models from config
   - [ ] Optionally verify PIDs
 
-- [ ] `src/commands/logs.ts` - pi logs
+- [ ] `src/commands/logs.ts` - void logs
   - [ ] Tail log file via SSH
   - [ ] Handle Ctrl+C (stop tailing only)
 
@@ -134,7 +134,7 @@ Quick model testing with tools
   - [ ] Handle streaming responses
   - [ ] Display thinking, tools, content
 
-- [ ] `src/commands/prompt.ts` - pi prompt
+- [ ] `src/commands/prompt.ts` - void prompt
   - [ ] Get model endpoint from config
   - [ ] Augment prompt with CWD info
   - [ ] Send request with tools

@@ -2,9 +2,9 @@
  * Extension runner - executes extensions and manages their lifecycle.
  */
 
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { ImageContent, Model } from "@mariozechner/pi-ai";
-import type { KeyId } from "@mariozechner/pi-tui";
+import type { AgentMessage } from "@void/agent";
+import type { ImageContent, Model } from "@void/ai";
+import type { KeyId } from "@void/tui";
 import { type Theme, theme } from "../../modes/interactive/theme/theme.js";
 import type { ResourceDiagnostic } from "../diagnostics.js";
 import type { KeybindingsConfig } from "../keybindings.js";
@@ -67,6 +67,7 @@ const RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS = [
 	"app.thinking.toggle",
 	"app.editor.external",
 	"app.message.followUp",
+	"app.child.cancel",
 	"tui.input.submit",
 	"tui.select.confirm",
 	"tui.select.cancel",

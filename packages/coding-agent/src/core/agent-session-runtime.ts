@@ -62,7 +62,9 @@ export class AgentSessionRuntime {
 		private _modelFallbackMessage?: string,
 		private _subagentRegistry?: SubagentRegistry,
 		private _harnessRunManager?: HarnessRunManager,
+		private readonly applicationShutdown?: () => Promise<void> | void,
 	) {}
+	private disposePromise?: Promise<void>;
 
 	get services(): AgentSessionServices {
 		return this._services;
@@ -301,8 +303,20 @@ export class AgentSessionRuntime {
 	}
 
 	async dispose(): Promise<void> {
-		await emitSessionShutdownEvent(this.session.extensionRunner);
-		this.session.dispose();
+		this.disposePromise ??= this.disposeApplication();
+		await this.disposePromise;
+	}
+
+	private async disposeApplication(): Promise<void> {
+		try {
+			await emitSessionShutdownEvent(this.session.extensionRunner);
+		} finally {
+			try {
+				this.session.dispose();
+			} finally {
+				await this.applicationShutdown?.();
+			}
+		}
 	}
 }
 
@@ -319,6 +333,7 @@ export async function createAgentSessionRuntime(
 		agentDir: string;
 		sessionManager: SessionManager;
 		sessionStartEvent?: SessionStartEvent;
+		applicationShutdown?: () => Promise<void> | void;
 	},
 ): Promise<AgentSessionRuntime> {
 	assertSessionCwdExists(options.sessionManager, options.cwd);
@@ -334,6 +349,7 @@ export async function createAgentSessionRuntime(
 		result.modelFallbackMessage,
 		result.subagentRegistry,
 		result.harnessRunManager,
+		options.applicationShutdown,
 	);
 }
 

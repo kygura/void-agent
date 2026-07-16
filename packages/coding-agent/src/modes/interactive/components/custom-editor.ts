@@ -1,4 +1,4 @@
-import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@mariozechner/pi-tui";
+import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@void/tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.js";
 
 /**
@@ -6,7 +6,7 @@ import type { AppKeybinding, KeybindingsManager } from "../../../core/keybinding
  */
 export class CustomEditor extends Editor {
 	private keybindings: KeybindingsManager;
-	public actionHandlers: Map<AppKeybinding, () => void> = new Map();
+	public actionHandlers: Map<AppKeybinding, () => boolean | void | Promise<void>> = new Map();
 
 	// Special handlers that can be dynamically replaced
 	public onEscape?: () => void;
@@ -23,7 +23,7 @@ export class CustomEditor extends Editor {
 	/**
 	 * Register a handler for an app action.
 	 */
-	onAction(action: AppKeybinding, handler: () => void): void {
+	onAction(action: AppKeybinding, handler: () => boolean | void | Promise<void>): void {
 		this.actionHandlers.set(action, handler);
 	}
 
@@ -69,8 +69,7 @@ export class CustomEditor extends Editor {
 		// Check all other app actions
 		for (const [action, handler] of this.actionHandlers) {
 			if (action !== "app.interrupt" && action !== "app.exit" && this.keybindings.matches(data, action)) {
-				handler();
-				return;
+				if (handler() !== false) return;
 			}
 		}
 

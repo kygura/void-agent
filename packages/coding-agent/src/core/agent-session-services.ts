@@ -1,10 +1,11 @@
 import { join } from "node:path";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { Model } from "@mariozechner/pi-ai";
+import type { ThinkingLevel } from "@void/agent";
+import type { Model } from "@void/ai";
 import { getAgentDir } from "../config.js";
 import { AuthStorage } from "./auth-storage.js";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.js";
 import { ModelRegistry } from "./model-registry.js";
+import { createOrchestrationExtension, type ProcessLifetimeOrchestrationHost } from "./orchestration/index.js";
 import { DefaultResourceLoader, type DefaultResourceLoaderOptions, type ResourceLoader } from "./resource-loader.js";
 import { type CreateAgentSessionResult, createAgentSession } from "./sdk.js";
 import type { SessionManager } from "./session-manager.js";
@@ -36,6 +37,7 @@ export interface CreateAgentSessionServicesOptions {
 	authStorage?: AuthStorage;
 	settingsManager?: SettingsManager;
 	modelRegistry?: ModelRegistry;
+	orchestrationHost?: ProcessLifetimeOrchestrationHost;
 	extensionFlagValues?: Map<string, boolean | string>;
 	resourceLoaderOptions?: Omit<DefaultResourceLoaderOptions, "cwd" | "agentDir" | "settingsManager">;
 	/** Named profile to layer into the default-created settings manager (ignored if settingsManager is provided) */
@@ -143,15 +145,27 @@ export async function createAgentSessionServices(
 			cliOverrides: options.settingsCliOverrides,
 		});
 	const modelRegistry = options.modelRegistry ?? ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+	const orchestrationDiagnostics =
+		options.orchestrationHost?.configure({ orchestrator: settingsManager.getOrchestratorSettings() }) ?? [];
+	const resourceLoaderOptions = options.resourceLoaderOptions ?? {};
 	const resourceLoader = new DefaultResourceLoader({
-		...(options.resourceLoaderOptions ?? {}),
+		...resourceLoaderOptions,
 		cwd,
 		agentDir,
 		settingsManager,
+		extensionFactories: [
+			...(options.orchestrationHost === undefined
+				? []
+				: [createOrchestrationExtension(options.orchestrationHost, { cwd })]),
+			...(resourceLoaderOptions.extensionFactories ?? []),
+		],
 	});
 	await resourceLoader.reload();
 
-	const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
+	const diagnostics: AgentSessionRuntimeDiagnostic[] = orchestrationDiagnostics.map((diagnostic) => ({
+		type: "error",
+		message: `${diagnostic.path}: ${diagnostic.message}`,
+	}));
 	const extensionsResult = resourceLoader.getExtensions();
 	for (const { name, config, extensionPath } of extensionsResult.runtime.pendingProviderRegistrations) {
 		try {

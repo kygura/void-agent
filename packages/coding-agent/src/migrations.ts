@@ -3,7 +3,22 @@
  */
 
 import chalk from "chalk";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	constants as fsConstants,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	renameSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "fs";
+import { homedir } from "os";
 import { dirname, join } from "path";
 import { CONFIG_DIR_NAME, getAgentDir, getBinDir } from "./config.js";
 import { migrateKeybindingsConfig } from "./core/keybindings.js";
@@ -11,6 +26,126 @@ import { migrateKeybindingsConfig } from "./core/keybindings.js";
 const MIGRATION_GUIDE_URL =
 	"https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md#extensions-migration";
 const EXTENSIONS_DOC_URL = "https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md";
+
+const PI_CONFIG_MIGRATION_VERSION = 1;
+export const PI_CONFIG_MIGRATION_MARKER = `.pi-config-migration-v${PI_CONFIG_MIGRATION_VERSION}`;
+const PI_CONFIG_ENTRIES = ["settings.json", "extensions", "chains", "APPEND_SYSTEM.md"] as const;
+
+export interface PiConfigMigrationOptions {
+	sourceDir?: string;
+	destinationDir?: string;
+}
+
+function pathExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function describeError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function copyPiConfigEntry(sourcePath: string, destinationPath: string, fileMode?: number): void {
+	const sourceStat = lstatSync(sourcePath);
+	if (pathExists(destinationPath)) {
+		const destinationStat = lstatSync(destinationPath);
+		if (sourceStat.isDirectory() && destinationStat.isDirectory() && !destinationStat.isSymbolicLink()) {
+			for (const entry of readdirSync(sourcePath)) {
+				copyPiConfigEntry(join(sourcePath, entry), join(destinationPath, entry), fileMode);
+			}
+		}
+		return;
+	}
+
+	if (sourceStat.isSymbolicLink()) {
+		symlinkSync(readlinkSync(sourcePath), destinationPath);
+		return;
+	}
+
+	if (sourceStat.isDirectory()) {
+		mkdirSync(destinationPath, { recursive: true, mode: sourceStat.mode & 0o777 });
+		for (const entry of readdirSync(sourcePath)) {
+			copyPiConfigEntry(join(sourcePath, entry), join(destinationPath, entry), fileMode);
+		}
+		return;
+	}
+
+	if (!sourceStat.isFile()) {
+		throw new Error(`Unsupported source entry type: ${sourcePath}`);
+	}
+
+	copyFileSync(sourcePath, destinationPath, fsConstants.COPYFILE_EXCL);
+	chmodSync(destinationPath, fileMode ?? sourceStat.mode & 0o777);
+}
+
+/**
+ * Copy the selected pi global configuration entries into the void global root.
+ * The source and destination are injectable for tests; production callers use
+ * ~/.pi/agent and the configured ~/.void root.
+ */
+export function migratePiConfig(options: PiConfigMigrationOptions = {}): void {
+	const sourceDir = options.sourceDir ?? join(homedir(), ".pi", "agent");
+	const destinationDir = options.destinationDir ?? getAgentDir();
+	const markerPath = join(destinationDir, PI_CONFIG_MIGRATION_MARKER);
+
+	if (pathExists(markerPath)) return;
+
+	const errors: string[] = [];
+	try {
+		const sourceStat = lstatSync(sourceDir);
+		if (!sourceStat.isDirectory()) {
+			throw new Error(`Source is not a directory: ${sourceDir}`);
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			try {
+				mkdirSync(destinationDir, { recursive: true, mode: 0o700 });
+				writeFileSync(markerPath, `${PI_CONFIG_MIGRATION_VERSION}\n`, {
+					encoding: "utf8",
+					mode: 0o600,
+					flag: "wx",
+				});
+			} catch (markerError) {
+				console.warn(`Warning: Could not complete pi configuration migration: ${describeError(markerError)}`);
+			}
+			return;
+		}
+		console.warn(`Warning: Could not read pi configuration source: ${describeError(error)}`);
+		return;
+	}
+
+	try {
+		mkdirSync(destinationDir, { recursive: true, mode: 0o700 });
+	} catch (error) {
+		console.warn(`Warning: Could not create void configuration root: ${describeError(error)}`);
+		return;
+	}
+
+	for (const entry of PI_CONFIG_ENTRIES) {
+		const sourcePath = join(sourceDir, entry);
+		if (!pathExists(sourcePath)) continue;
+		try {
+			copyPiConfigEntry(sourcePath, join(destinationDir, entry), entry === "settings.json" ? 0o600 : undefined);
+		} catch (error) {
+			errors.push(`${entry}: ${describeError(error)}`);
+		}
+	}
+
+	if (errors.length > 0) {
+		console.warn(`Warning: Could not complete pi configuration migration: ${errors.join("; ")}`);
+		return;
+	}
+
+	try {
+		writeFileSync(markerPath, `${PI_CONFIG_MIGRATION_VERSION}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+	} catch (error) {
+		console.warn(`Warning: Could not record pi configuration migration completion: ${describeError(error)}`);
+	}
+}
 
 /**
  * Migrate legacy oauth.json and settings.json apiKeys to auth.json.
@@ -72,10 +207,10 @@ export function migrateAuthToAuthJson(): string[] {
 }
 
 /**
- * Migrate sessions from ~/.pi/agent/*.jsonl to proper session directories.
+ * Migrate sessions from ~/.void/*.jsonl to proper session directories.
  *
- * Bug in v0.30.0: Sessions were saved to ~/.pi/agent/ instead of
- * ~/.pi/agent/sessions/<encoded-cwd>/. This migration moves them
+ * Bug in v0.30.0: Sessions were saved to ~/.void/ instead of
+ * ~/.void/sessions/<encoded-cwd>/. This migration moves them
  * to the correct location based on the cwd in their session header.
  *
  * See: https://github.com/badlogic/pi-mono/issues/320
@@ -305,6 +440,7 @@ export function runMigrations(cwd: string = process.cwd()): {
 	migratedAuthProviders: string[];
 	deprecationWarnings: string[];
 } {
+	migratePiConfig();
 	const migratedAuthProviders = migrateAuthToAuthJson();
 	migrateSessionsFromAgentRoot();
 	migrateToolsToBin();

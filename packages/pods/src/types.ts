@@ -1,4 +1,4 @@
-// Core type definitions for pi
+// Core type definitions for void
 
 export interface GPU {
 	id: number;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-process.title = "pi";
-process.emitWarning = (() => {}) as typeof process.emitWarning;
+import "./register-bedrock.js";
+import "../cli.js";
 
-await import("./register-bedrock.js");
-await import("../cli.js");
+process.title = "void";
+process.emitWarning = (() => {}) as typeof process.emitWarning;

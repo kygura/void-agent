@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","cwd":"/tmp/work","tools":["bash"],"model":"claude-opus-4","permissionMode":"default","session_id":"sess-abc"}
+{"type":"stream_event","event":{"type":"content_block_start","index":0}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}}
+{"type":"future_block_type","foo":"bar"}
+this is not json at all
+{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"},{"type":"tool_use","name":"bash","input":{"command":"ls"}}]},"session_id":"sess-abc"}
+{"type":"result","subtype":"success","is_error":false,"result":"Hello world","total_cost_usd":0.002,"usage":{"input_tokens":10,"output_tokens":5},"session_id":"sess-abc"}

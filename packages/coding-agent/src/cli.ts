@@ -3,9 +3,9 @@
  * CLI entry point for the refactored coding agent.
  * Uses main.ts with AgentSession and new mode modules.
  *
- * Test with: npx tsx src/cli-new.ts [args...]
+ * Test with: bun src/cli.ts [args...]
  */
-process.title = "pi";
+process.title = "void";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";

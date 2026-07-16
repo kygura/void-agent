@@ -1,6 +1,6 @@
-import type { TextContent } from "@mariozechner/pi-ai";
-import type { Component } from "@mariozechner/pi-tui";
-import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@mariozechner/pi-tui";
+import type { TextContent } from "@void/ai";
+import type { Component, Focusable } from "@void/tui";
+import { Box, Container, isFocusable, Markdown, type MarkdownTheme, Spacer, Text } from "@void/tui";
 import type { MessageRenderer } from "../../../core/extensions/types.js";
 import type { CustomMessage } from "../../../core/messages.js";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
@@ -9,13 +9,32 @@ import { getMarkdownTheme, theme } from "../theme/theme.js";
  * Component that renders a custom message entry from extensions.
  * Uses distinct styling to differentiate from user messages.
  */
-export class CustomMessageComponent extends Container {
+export class CustomMessageComponent extends Container implements Focusable {
 	private message: CustomMessage<unknown>;
 	private customRenderer?: MessageRenderer;
 	private box: Box;
 	private customComponent?: Component;
 	private markdownTheme: MarkdownTheme;
 	private _expanded = false;
+	private _focused = false;
+
+	get focused(): boolean {
+		return this._focused;
+	}
+
+	set focused(value: boolean) {
+		this._focused = value;
+		const component = this.customComponent;
+		if (component !== undefined && isFocusable(component)) component.focused = value;
+	}
+
+	get customType(): string {
+		return this.message.customType;
+	}
+
+	get details(): unknown {
+		return this.message.details;
+	}
 
 	constructor(
 		message: CustomMessage<unknown>,
@@ -42,6 +61,10 @@ export class CustomMessageComponent extends Container {
 		}
 	}
 
+	handleInput(data: string): void {
+		this.customComponent?.handleInput?.(data);
+	}
+
 	override invalidate(): void {
 		super.invalidate();
 		this.rebuild();
@@ -50,6 +73,7 @@ export class CustomMessageComponent extends Container {
 	private rebuild(): void {
 		// Remove previous content component
 		if (this.customComponent) {
+			if (isFocusable(this.customComponent)) this.customComponent.focused = false;
 			this.removeChild(this.customComponent);
 			this.customComponent = undefined;
 		}
@@ -62,6 +86,7 @@ export class CustomMessageComponent extends Container {
 				if (component) {
 					// Custom renderer provides its own styled component
 					this.customComponent = component;
+					if (isFocusable(component)) component.focused = this._focused;
 					this.addChild(component);
 					return;
 				}

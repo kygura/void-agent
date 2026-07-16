@@ -7,8 +7,8 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@mariozechner/pi-ai";
+import type { AgentMessage } from "@void/agent";
+import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@void/ai";
 import type {
 	AutocompleteItem,
 	EditorComponent,
@@ -19,7 +19,7 @@ import type {
 	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
-} from "@mariozechner/pi-tui";
+} from "@void/tui";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -35,7 +35,7 @@ import {
 	TruncatedText,
 	TUI,
 	visibleWidth,
-} from "@mariozechner/pi-tui";
+} from "@void/tui";
 import { spawn, spawnSync } from "child_process";
 import {
 	APP_NAME,
@@ -59,6 +59,8 @@ import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
 import { createCompactionSummaryMessage } from "../../core/messages.js";
 import { findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.js";
+import { isVoidSpawnMessageDetails, VOID_SPAWN_CUSTOM_TYPE } from "../../core/orchestration/messages.js";
+import { getActiveOrchestrationHost, installOrchestrationUiController } from "../../core/orchestration/ui-bridge.js";
 import { DefaultPackageManager } from "../../core/package-manager.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
@@ -71,12 +73,14 @@ import { copyToClipboard } from "../../utils/clipboard.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
 import { parseGitUrl } from "../../utils/git.js";
 import { ensureTool } from "../../utils/tools-manager.js";
+import { type AgentRunSummary, cancelAgentRun, collectAgentRuns, getRunOutputText } from "./components/agent-runs.js";
 import { AgentsOverlayComponent } from "./components/agents-overlay.js";
 import { ArminComponent } from "./components/armin.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
 import { BashExecutionComponent } from "./components/bash-execution.js";
 import { BorderedLoader } from "./components/bordered-loader.js";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.js";
+import { type ChildSessionTarget, ChildSessionView } from "./components/child-session-view.js";
 import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.js";
 import { CustomEditor } from "./components/custom-editor.js";
 import { CustomMessageComponent } from "./components/custom-message.js";
@@ -93,8 +97,9 @@ import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
-import { Sidebar, SidebarLayout } from "./components/sidebar.js";
+import { isSidebarVisible, Sidebar, SidebarLayout } from "./components/sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
+import { SplashComponent } from "./components/splash.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
@@ -247,12 +252,17 @@ export class InteractiveMode {
 	private sidebarLayout: SidebarLayout;
 	// Unsubscribe from the current session's SubagentRegistry/HarnessRunManager change events
 	private agentPanelsUnsubscribe?: () => void;
+	private orchestrationUiUnsubscribe?: () => void;
+	private childSessionView?: ChildSessionView;
 
 	// Built-in header (logo + keybinding hints + changelog)
 	private builtInHeader: Component | undefined = undefined;
 
 	// Custom header from extension (undefined = use built-in header)
 	private customHeader: (Component & { dispose?(): void }) | undefined = undefined;
+
+	// Animated startup hero, shown only while the current session has no transcript.
+	private splash: SplashComponent | undefined;
 
 	// Convenience accessors
 	private get session(): AgentSession {
@@ -299,6 +309,14 @@ export class InteractiveMode {
 		this.chatColumn = new Container();
 		this.sidebar = new Sidebar(this.session, this.runtimeHost, this.footerDataProvider);
 		this.sidebarLayout = new SidebarLayout(this.chatColumn, this.sidebar, this.settingsManager);
+		this.sidebar.setActions({
+			onEnter: (run) => this.openChildRun(run),
+			onCancel: (run) => void this.requestAgentRunCancel(run),
+			onBlur: () => {
+				this.ui.setFocus(this.editor);
+				this.ui.requestRender();
+			},
+		});
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
@@ -353,9 +371,11 @@ export class InteractiveMode {
 			.map((command) => ({
 				type: "warning" as const,
 				message:
-					command.invocationName === command.name
-						? `Extension command '/${command.name}' conflicts with built-in interactive command. Skipping in autocomplete.`
-						: `Extension command '/${command.name}' conflicts with built-in interactive command. Available as '/${command.invocationName}'.`,
+					command.name === "login" && command.invocationName === command.name
+						? `Extension command '/${command.name}' conflicts with built-in interactive command. Using its argument completions on the built-in command.`
+						: command.invocationName === command.name
+							? `Extension command '/${command.name}' conflicts with built-in interactive command. Skipping in autocomplete.`
+							: `Extension command '/${command.name}' conflicts with built-in interactive command. Available as '/${command.invocationName}'.`,
 				path: command.sourceInfo.path,
 			}));
 	}
@@ -405,14 +425,36 @@ export class InteractiveMode {
 		}));
 
 		// Convert extension commands to SlashCommand format
-		const builtinCommandNames = new Set(slashCommands.map((c) => c.name));
-		const extensionCommands: SlashCommand[] = (
-			this.session.extensionRunner?.getRegisteredCommands().filter((cmd) => !builtinCommandNames.has(cmd.name)) ?? []
-		).map((cmd) => ({
-			name: cmd.invocationName,
-			description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
-			getArgumentCompletions: cmd.getArgumentCompletions,
-		}));
+		const builtinCommands = new Map(slashCommands.map((command) => [command.name, command]));
+		const extensionCommands: SlashCommand[] = [];
+		for (const command of this.session.extensionRunner?.getRegisteredCommands() ?? []) {
+			const builtin = builtinCommands.get(command.name);
+			if (builtin !== undefined) {
+				if (
+					command.name === "login" &&
+					command.invocationName === command.name &&
+					command.getArgumentCompletions !== undefined
+				) {
+					const builtinCompletions = builtin.getArgumentCompletions;
+					builtin.getArgumentCompletions = async (prefix) => {
+						const [base, extension] = await Promise.all([
+							builtinCompletions?.(prefix) ?? null,
+							command.getArgumentCompletions?.(prefix) ?? null,
+						]);
+						const merged = [...(base ?? []), ...(extension ?? [])].filter(
+							(item, index, items) => items.findIndex((candidate) => candidate.value === item.value) === index,
+						);
+						return merged.length === 0 ? null : merged;
+					};
+				}
+				continue;
+			}
+			extensionCommands.push({
+				name: command.invocationName,
+				description: this.prefixAutocompleteDescription(command.description, command.sourceInfo),
+				getArgumentCompletions: command.getArgumentCompletions,
+			});
+		}
 
 		// Build skill commands from session.skills (if enabled)
 		this.skillCommands.clear();
@@ -535,6 +577,14 @@ export class InteractiveMode {
 		this.ui.addChild(this.sidebarLayout);
 		this.ui.addChild(this.footer);
 		this.ui.setFocus(this.editor);
+		this.orchestrationUiUnsubscribe = installOrchestrationUiController({
+			openAgents: () => this.showAgentsOverlay(),
+			openChild: (targetId) => this.openChildTarget(targetId),
+			requestCancel: (targetId) => this.requestChildCancel(targetId),
+			requestRender: () => this.ui.requestRender(),
+			focusedChildSessionId: () => this.childSessionView?.childSessionId,
+			focusedRunId: () => this.childSessionView?.runId,
+		});
 
 		this.setupKeyHandlers();
 		this.setupEditorSubmitHandler();
@@ -548,6 +598,7 @@ export class InteractiveMode {
 
 		// Render initial messages AFTER showing loaded resources
 		this.renderInitialMessages();
+		this.showSplashIfEmpty();
 
 		// Set terminal title
 		this.updateTerminalTitle();
@@ -666,10 +717,10 @@ export class InteractiveMode {
 	 * Check npm registry for a newer version.
 	 */
 	private async checkForNewVersion(): Promise<string | undefined> {
-		if (process.env.PI_SKIP_VERSION_CHECK || process.env.PI_OFFLINE) return undefined;
+		if (process.env.VOID_SKIP_VERSION_CHECK || process.env.VOID_OFFLINE) return undefined;
 
 		try {
-			const response = await fetch("https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest", {
+			const response = await fetch("https://registry.npmjs.org/@void/coding-agent/latest", {
 				signal: AbortSignal.timeout(10000),
 			});
 			if (!response.ok) return undefined;
@@ -688,7 +739,7 @@ export class InteractiveMode {
 	}
 
 	private async checkForPackageUpdates(): Promise<string[]> {
-		if (process.env.PI_OFFLINE) {
+		if (process.env.VOID_OFFLINE) {
 			return [];
 		}
 
@@ -1290,6 +1341,7 @@ export class InteractiveMode {
 	}
 
 	private async handleRuntimeSessionChange(): Promise<void> {
+		this.detachChildView();
 		this.resetExtensionUI();
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -1311,6 +1363,7 @@ export class InteractiveMode {
 	}
 
 	private renderCurrentSessionState(): void {
+		this.stopSplash(false);
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
 		this.compactionQueuedMessages = [];
@@ -1318,6 +1371,21 @@ export class InteractiveMode {
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
 		this.renderInitialMessages();
+		this.showSplashIfEmpty();
+	}
+
+	private showSplashIfEmpty(): void {
+		if (this.splash || this.session.messages.length > 0) return;
+		this.splash = new SplashComponent(this.ui, APP_NAME);
+		this.chatContainer.children.unshift(this.splash);
+	}
+
+	private stopSplash(requestRender = true): void {
+		if (!this.splash) return;
+		this.splash.stop();
+		this.chatContainer.removeChild(this.splash);
+		this.splash = undefined;
+		if (requestRender) this.ui.requestRender();
 	}
 
 	/**
@@ -2077,6 +2145,8 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
 		this.defaultEditor.onAction("app.sidebar.toggle", () => this.toggleSidebar());
+		this.defaultEditor.onAction("app.sidebar.focus", () => this.focusSidebar());
+		this.defaultEditor.onAction("app.child.enter", () => this.focusLatestLiveSpawnEntry());
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -2232,11 +2302,6 @@ export class InteractiveMode {
 				this.toggleSidebar();
 				return;
 			}
-			if (text === "/agents") {
-				this.editor.setText("");
-				this.showAgentsOverlay();
-				return;
-			}
 			if (text === "/quit") {
 				this.editor.setText("");
 				await this.shutdown();
@@ -2304,12 +2369,17 @@ export class InteractiveMode {
 		this.agentPanelsUnsubscribe?.();
 		const subagentRegistry = this.runtimeHost.subagentRegistry;
 		const harnessRunManager = this.runtimeHost.harnessRunManager;
+		const orchestrationHost = getActiveOrchestrationHost();
 		const unsubscribers: Array<() => void> = [];
 		if (subagentRegistry) {
 			unsubscribers.push(subagentRegistry.onChange(() => this.ui.requestRender()));
 		}
 		if (harnessRunManager) {
 			unsubscribers.push(harnessRunManager.subscribe(() => this.ui.requestRender()));
+		}
+		if (orchestrationHost) {
+			const subscription = orchestrationHost.subscribe(() => this.ui.requestRender());
+			unsubscribers.push(() => subscription.unsubscribe());
 		}
 		this.agentPanelsUnsubscribe = () => {
 			for (const unsub of unsubscribers) unsub();
@@ -2322,7 +2392,43 @@ export class InteractiveMode {
 		this.showStatus(`Sidebar: ${enabled ? "enabled" : "disabled"}`);
 	}
 
+	private focusSidebar(): void {
+		if (!isSidebarVisible(this.ui.terminal.columns, this.settingsManager.getSidebar())) {
+			this.showStatus("Sidebar is hidden at this width");
+			return;
+		}
+		this.ui.setFocus(this.sidebar);
+		this.ui.requestRender();
+	}
+
+	private focusLatestLiveSpawnEntry(): boolean {
+		if (this.editor.getText().length > 0) return false;
+		const host = getActiveOrchestrationHost();
+		if (host === undefined) return false;
+		const snapshot = host.snapshot();
+		for (let index = this.chatContainer.children.length - 1; index >= 0; index -= 1) {
+			const child = this.chatContainer.children[index];
+			const details = child instanceof CustomMessageComponent ? child.details : undefined;
+			if (
+				!(child instanceof CustomMessageComponent) ||
+				child.customType !== VOID_SPAWN_CUSTOM_TYPE ||
+				!isVoidSpawnMessageDetails(details)
+			) {
+				continue;
+			}
+			const session = snapshot.sessions.find((item) => item.id === details.childSessionId);
+			const runId = session?.runIds.at(-1);
+			const run = runId === undefined ? undefined : snapshot.runs.find((item) => item.id === runId);
+			if (run?.state !== "pending" && run?.state !== "running") continue;
+			this.ui.setFocus(child);
+			this.ui.requestRender();
+			return true;
+		}
+		return false;
+	}
+
 	private showAgentsOverlay(): void {
+		const orchestrationHost = getActiveOrchestrationHost();
 		this.showSelector((done) => {
 			const overlay = new AgentsOverlayComponent(
 				this.runtimeHost.subagentRegistry,
@@ -2332,9 +2438,143 @@ export class InteractiveMode {
 					this.ui.requestRender();
 				},
 				() => this.ui.requestRender(),
+				{
+					orchestrationHost,
+					parentSessionId: this.session.sessionId,
+					onEnter: (run) => {
+						done();
+						this.openChildRun(run);
+					},
+					confirm: (title, message) => this.showExtensionConfirm(title, message),
+				},
 			);
 			return { component: overlay, focus: overlay };
 		});
+	}
+
+	private openChildTarget(targetId: string): void {
+		const host = getActiveOrchestrationHost();
+		if (host === undefined) return;
+		const snapshot = host.snapshot();
+		const session = snapshot.sessions.find((item) => item.id === targetId);
+		if (session !== undefined) {
+			const runId = session.runIds.at(-1);
+			const run = runId === undefined ? undefined : snapshot.runs.find((item) => item.id === runId);
+			if (run !== undefined) {
+				this.mountChildView({
+					kind: "session",
+					session,
+					run,
+					providerType: host.providerConfig(session.provider)?.type ?? "generic",
+				});
+				return;
+			}
+		}
+		const run = snapshot.runs.find((item) => item.id === targetId);
+		if (run !== undefined) this.mountChildView({ kind: "task", run });
+	}
+
+	private openChildRun(summary: AgentRunSummary): void {
+		if (summary.origin === "session") {
+			this.openChildTarget(summary.id);
+			return;
+		}
+		if (summary.origin === "task") {
+			this.openChildTarget(summary.runId);
+			return;
+		}
+		const getCurrent = () =>
+			collectAgentRuns(
+				this.runtimeHost.subagentRegistry?.list() ?? [],
+				this.runtimeHost.harnessRunManager?.runs() ?? [],
+			).find((run) => run.origin === summary.origin && run.id === summary.id);
+		this.mountChildView({
+			kind: "external",
+			summary,
+			getCurrent,
+			getOutputText: () =>
+				getRunOutputText(
+					getCurrent() ?? summary,
+					this.runtimeHost.subagentRegistry,
+					this.runtimeHost.harnessRunManager,
+				),
+			subscribe: (listener) => {
+				const unsubscribers: Array<() => void> = [];
+				if (this.runtimeHost.subagentRegistry) {
+					unsubscribers.push(this.runtimeHost.subagentRegistry.onChange(listener));
+				}
+				if (this.runtimeHost.harnessRunManager) {
+					unsubscribers.push(this.runtimeHost.harnessRunManager.subscribe(listener));
+				}
+				return () => {
+					for (const unsubscribe of unsubscribers) unsubscribe();
+				};
+			},
+			cancel: () =>
+				cancelAgentRun(getCurrent() ?? summary, this.runtimeHost.harnessRunManager, getActiveOrchestrationHost()),
+		});
+	}
+
+	private async requestAgentRunCancel(run: AgentRunSummary): Promise<void> {
+		if (run.state !== "pending" && run.state !== "running") return;
+		const queued = run.queue?.length ?? 0;
+		const message =
+			queued === 0
+				? `cancel ${run.name}?`
+				: `cancel run? ${queued} queued prompt${queued === 1 ? "" : "s"} — the oldest starts next`;
+		if (!(await this.showExtensionConfirm("Cancel child Run", message))) return;
+		const result = cancelAgentRun(run, this.runtimeHost.harnessRunManager, getActiveOrchestrationHost());
+		if (!result.cancelled) this.showExtensionNotify(result.reason, "warning");
+	}
+
+	private requestChildCancel(targetId: string): void {
+		const host = getActiveOrchestrationHost();
+		if (host === undefined) return;
+		const snapshot = host.snapshot();
+		const session = snapshot.sessions.find((item) => item.id === targetId);
+		const run =
+			session === undefined
+				? snapshot.runs.find((item) => item.id === targetId)
+				: snapshot.runs.find((item) => item.id === session.runIds.at(-1));
+		if (run === undefined || (run.state !== "pending" && run.state !== "running")) return;
+		const queued = session?.queue.prompts.length ?? 0;
+		const message =
+			queued === 0
+				? "cancel run?"
+				: `cancel run? ${queued} queued prompt${queued === 1 ? "" : "s"} — the oldest starts next`;
+		void this.showExtensionConfirm("Cancel child Run", message).then((confirmed) => {
+			if (confirmed) host.cancel(session?.id ?? run.id);
+		});
+	}
+
+	private mountChildView(target: ChildSessionTarget): void {
+		const host = getActiveOrchestrationHost();
+		if (host === undefined) return;
+		this.childSessionView?.dispose();
+		this.childSessionView = new ChildSessionView(host, target, this.ui, this.keybindings, {
+			parentName: this.session.sessionName ?? this.session.sessionId,
+			confirm: (title, message) => this.showExtensionConfirm(title, message),
+			notify: (message, type) => this.showExtensionNotify(message, type),
+			detach: () => this.detachChildView(),
+			requestRender: () => this.ui.requestRender(),
+		});
+		this.ui.clear();
+		this.ui.addChild(this.childSessionView);
+		this.ui.addChild(this.customFooter ?? this.footer);
+		this.ui.setFocus(this.childSessionView);
+		this.ui.requestRender();
+	}
+
+	private detachChildView(): void {
+		if (this.childSessionView === undefined) return;
+		this.childSessionView.dispose();
+		this.childSessionView = undefined;
+		this.ui.clear();
+		this.ui.addChild(this.headerContainer);
+		this.ui.addChild(this.sidebarLayout);
+		this.ui.addChild(this.customFooter ?? this.footer);
+		this.ui.setFocus(this.editor);
+		this.ui.requestRender();
 	}
 
 	private subscribeToAgent(): void {
@@ -2349,6 +2589,9 @@ export class InteractiveMode {
 		}
 
 		this.footer.invalidate();
+		if (event.type === "message_start") {
+			this.stopSplash();
+		}
 
 		switch (event.type) {
 			case "agent_start":
@@ -3078,7 +3321,7 @@ export class InteractiveMode {
 		}
 
 		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
-		const tmpFile = path.join(os.tmpdir(), `pi-editor-${Date.now()}.pi.md`);
+		const tmpFile = path.join(os.tmpdir(), `void-editor-${Date.now()}.void.md`);
 
 		try {
 			// Write current content to temp file
@@ -3139,7 +3382,7 @@ export class InteractiveMode {
 	}
 
 	showNewVersionNotification(newVersion: string): void {
-		const action = theme.fg("accent", getUpdateInstruction("@mariozechner/pi-coding-agent"));
+		const action = theme.fg("accent", getUpdateInstruction("@void/coding-agent"));
 		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. `) + action;
 		const changelogUrl = theme.fg(
 			"accent",
@@ -4741,6 +4984,13 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
+		this.stopSplash(false);
+		this.childSessionView?.dispose();
+		this.childSessionView = undefined;
+		this.agentPanelsUnsubscribe?.();
+		this.agentPanelsUnsubscribe = undefined;
+		this.orchestrationUiUnsubscribe?.();
+		this.orchestrationUiUnsubscribe = undefined;
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;

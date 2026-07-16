@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-AUTH_FILE="$HOME/.pi/agent/auth.json"
-AUTH_BACKUP="$HOME/.pi/agent/auth.json.bak"
+AUTH_FILE="$HOME/.void/auth.json"
+AUTH_BACKUP="$HOME/.void/auth.json.bak"
 
 # Restore auth.json on exit (success or failure)
 cleanup() {
@@ -20,7 +20,7 @@ if [[ -f "$AUTH_FILE" ]]; then
 fi
 
 # Skip local LLM tests (ollama, lmstudio)
-export PI_NO_LOCAL_LLM=1
+export VOID_NO_LOCAL_LLM=1
 
 # Unset API keys (see packages/ai/src/stream.ts getEnvApiKey)
 unset ANTHROPIC_API_KEY
@@ -59,4 +59,4 @@ unset AWS_WEB_IDENTITY_TOKEN_FILE
 unset BEDROCK_EXTENSIVE_MODEL_TEST
 
 echo "Running tests without API keys..."
-npm test
+bun run test

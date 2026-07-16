@@ -1,15 +1,15 @@
 {
-	"name": "@mariozechner/pi",
+	"name": "@void/pods",
 	"version": "0.65.2",
 	"description": "CLI tool for managing vLLM deployments on GPU pods",
 	"type": "module",
 	"bin": {
-		"pi-pods": "dist/cli.js"
+		"void-pods": "dist/cli.js"
 	},
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js && shx cp src/models.json dist/ && shx cp -r scripts dist/",
-		"prepublishOnly": "npm run clean && npm run build"
+		"prepublishOnly": "bun run clean && bun run build"
 	},
 	"files": [
 		"dist",
@@ -33,7 +33,7 @@
 		"node": ">=20.0.0"
 	},
 	"dependencies": {
-		"@mariozechner/pi-agent-core": "^0.65.2",
+		"@void/agent": "^0.65.2",
 		"chalk": "^5.5.0"
 	},
 	"devDependencies": {}

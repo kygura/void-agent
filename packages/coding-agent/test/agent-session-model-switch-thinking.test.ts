@@ -1,5 +1,5 @@
-import { Agent, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { getModel } from "@mariozechner/pi-ai";
+import { Agent, type ThinkingLevel } from "@void/agent";
+import { getModel } from "@void/ai";
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
@@ -9,7 +9,11 @@ import { SettingsManager } from "../src/core/settings-manager.js";
 import { createTestResourceLoader } from "./utilities.js";
 
 const reasoningModel = getModel("anthropic", "claude-sonnet-4-5")!;
-const nonReasoningModel = getModel("anthropic", "claude-3-5-haiku-latest")!;
+const nonReasoningModel = {
+	...reasoningModel,
+	id: "non-reasoning-test-model",
+	reasoning: false,
+};
 
 function createSession({
 	thinkingLevel = "high",

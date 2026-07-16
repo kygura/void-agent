@@ -1,12 +1,12 @@
 # Settings
 
-Pi uses JSON settings files, layered low to high precedence:
+void uses JSON settings files, layered low to high precedence:
 
 | Location | Scope |
 |----------|-------|
-| `~/.pi/agent/settings.json` | Global (all projects) |
-| `~/.pi/agent/profiles/<name>.json` | Profile, only when `--profile <name>` is passed |
-| `.pi/settings.json` | Project (current directory) |
+| `~/.void/settings.json` | Global (all projects) |
+| `~/.void/profiles/<name>.json` | Profile, only when `--profile <name>` is passed |
+| `.void/settings.json` | Project (current directory) |
 | `--config key.path=value` | CLI override (highest precedence, in-memory only) |
 
 Nested objects merge recursively at each layer; arrays and scalars in a higher layer replace the lower layer's value.
@@ -15,10 +15,10 @@ Edit settings files directly or use `/settings` for common options. Settings cha
 
 ## Profiles
 
-`--profile <name>` loads `~/.pi/agent/profiles/<name>.json` and layers it between global and project settings. Useful for switching between named configurations (e.g. a "work" profile with a different default model). Exits with an error listing available profiles if the named profile file doesn't exist.
+`--profile <name>` loads `~/.void/profiles/<name>.json` and layers it between global and project settings. Useful for switching between named configurations (e.g. a "work" profile with a different default model). Exits with an error listing available profiles if the named profile file doesn't exist.
 
 ```bash
-pi --profile work
+void --profile work
 ```
 
 ## CLI Overrides
@@ -26,7 +26,7 @@ pi --profile work
 `--config key.path=value` (repeatable) sets a settings value by dotted path, applied on top of every other layer. The value is parsed as JSON, falling back to a raw string if it isn't valid JSON.
 
 ```bash
-pi --config theme=dark --config 'statusLine=["model","git-branch"]'
+void --config theme=dark --config 'statusLine=["model","git-branch"]'
 ```
 
 ## All Settings
@@ -85,7 +85,7 @@ When set, replaces the default footer with a single line built from the given it
 | `used-tokens` | Total tokens used this session, compact form (e.g. `12.3k`) |
 | `cost` | Session cost in USD, if computable |
 | `session-name` | Session name, if set |
-| `version` | Pi version |
+| `version` | void version |
 | `status` | Extension statuses set via `ctx.ui.setStatus()` |
 
 Items that have no value are dropped (no double separators).
@@ -184,7 +184,7 @@ When a provider requests a retry delay longer than `maxDelayMs` (e.g., Google's 
 | `sessionDir` | string | - | Directory where session files are stored. Accepts absolute or relative paths. |
 
 ```json
-{ "sessionDir": ".pi/sessions" }
+{ "sessionDir": ".void/sessions" }
 ```
 
 When multiple sources specify a session directory, `--session-dir` CLI flag takes precedence over `sessionDir` in settings.json.
@@ -211,7 +211,7 @@ When multiple sources specify a session directory, `--session-dir` CLI flag take
 
 These settings define where to load extensions, skills, prompts, and themes from.
 
-Paths in `~/.pi/agent/settings.json` resolve relative to `~/.pi/agent`. Paths in `.pi/settings.json` resolve relative to `.pi`. Absolute paths and `~` are supported.
+Paths in `~/.void/settings.json` resolve relative to `~/.void`. Paths in `.void/settings.json` resolve relative to `.void`. Absolute paths and `~` are supported.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -230,7 +230,7 @@ String form loads all resources from a package:
 
 ```json
 {
-  "packages": ["pi-skills", "@org/my-extension"]
+  "packages": ["void-skills", "@org/my-extension"]
 }
 ```
 
@@ -240,7 +240,7 @@ Object form filters which resources to load:
 {
   "packages": [
     {
-      "source": "pi-skills",
+      "source": "void-skills",
       "skills": ["brave-search", "transcribe"],
       "extensions": []
     }
@@ -249,6 +249,41 @@ Object form filters which resources to load:
 ```
 
 See [packages.md](packages.md) for package management details.
+
+### Child orchestration
+
+Child Provider configuration is an optional `orchestrator` object in `settings.json`. The same schema is accepted in global and project settings; project values override global values through the normal nested settings merge.
+
+```json
+{
+  "orchestrator": {
+    "defaultProvider": "claude",
+    "providers": {
+      "claude": {
+        "type": "claude",
+        "models": ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"]
+      },
+      "codex": { "type": "codex" },
+      "reviewer": {
+        "type": "generic",
+        "command": "reviewer-cli",
+        "args": ["run", "{{prompt}}"],
+        "modelFlag": "--model",
+        "effortFlag": "--effort",
+        "models": ["reviewer-default"],
+        "extraArgs": [],
+        "env": ["REVIEWER_API_KEY=..."],
+        "auth": "auto"
+      },
+      "mock": { "type": "mock" }
+    }
+  }
+}
+```
+
+`defaultProvider` must name an entry in `providers`. Provider types are `claude`, `codex`, `generic`, and `mock`. A generic provider requires a `command` and exactly one argv element equal to `{{prompt}}`; substring interpolation and shell templates are not supported. `modelFlag` and `effortFlag` add discrete argv values, `models` supplies configured model choices, `extraArgs` appends argv entries, and `env` entries use `KEY=VALUE` to overlay the parent environment. Environment values are never logged. The optional `auth` mode is `auto`, `subscription`, or `api`.
+
+If `orchestrator` is absent, the runtime supplies its built-in Provider defaults with `claude` as the default. Invalid orchestration settings produce startup diagnostics and do not rewrite the settings file.
 
 ## Example
 
@@ -268,22 +303,22 @@ See [packages.md](packages.md) for package management details.
     "maxRetries": 3
   },
   "enabledModels": ["claude-*", "gpt-4o"],
-  "packages": ["pi-skills"]
+  "packages": ["void-skills"]
 }
 ```
 
 ## Project Overrides
 
-Project settings (`.pi/settings.json`) override global settings. Nested objects are merged:
+Project settings (`.void/settings.json`) override global settings. Nested objects are merged:
 
 ```json
-// ~/.pi/agent/settings.json (global)
+// ~/.void/settings.json (global)
 {
   "theme": "dark",
   "compaction": { "enabled": true, "reserveTokens": 16384 }
 }
 
-// .pi/settings.json (project)
+// .void/settings.json (project)
 {
   "compaction": { "reserveTokens": 8192 }
 }

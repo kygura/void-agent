@@ -5,7 +5,7 @@ import {
 	type KeyId,
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
-} from "@mariozechner/pi-tui";
+} from "@void/tui";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "../config.js";
@@ -40,11 +40,16 @@ export interface AppKeybindings {
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
 	"app.sidebar.toggle": true;
+	"app.sidebar.focus": true;
+	"app.child.enter": true;
+	"app.child.detach": true;
+	"app.child.cancel": true;
+	"app.child.queueDrop": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
 
-declare module "@mariozechner/pi-tui" {
+declare module "@void/tui" {
 	interface Keybindings extends AppKeybindings {}
 }
 
@@ -135,6 +140,26 @@ export const KEYBINDINGS = {
 	"app.sidebar.toggle": {
 		defaultKeys: "ctrl+x",
 		description: "Toggle the session sidebar",
+	},
+	"app.sidebar.focus": {
+		defaultKeys: "alt+x",
+		description: "Focus the session sidebar",
+	},
+	"app.child.enter": {
+		defaultKeys: "enter",
+		description: "Enter the selected child Session",
+	},
+	"app.child.detach": {
+		defaultKeys: "escape",
+		description: "Detach from the child Session",
+	},
+	"app.child.cancel": {
+		defaultKeys: "ctrl+x",
+		description: "Cancel the child Run",
+	},
+	"app.child.queueDrop": {
+		defaultKeys: "alt+backspace",
+		description: "Drop the newest child prompt",
 	},
 } as const satisfies KeybindingDefinitions;
 
