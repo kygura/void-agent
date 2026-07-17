@@ -35,7 +35,7 @@ export type ExplicitEffort = Exclude<Effort, "default">;
 /** The Go-compatible auth mode. An omitted or empty value means automatic mode. */
 export type AuthMode = "" | "auto" | "subscription" | "api";
 
-export type ProviderType = "claude" | "codex" | "generic" | "mock";
+export type ProviderType = "claude" | "codex" | "generic" | "mock" | "void";
 
 export interface RunConfig {
 	provider: string;

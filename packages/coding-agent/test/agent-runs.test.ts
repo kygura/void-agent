@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { HarnessRun } from "../src/core/harness/index.js";
+import type { HarnessRun, HarnessRunManager } from "../src/core/harness/index.js";
 import type { SubagentRegistry, SubagentRunRecord } from "../src/core/tools/subagent.js";
 import {
+	type AgentRunSummary,
+	cancelAgentRun,
 	collectAgentRuns,
 	elapsedMs,
 	formatElapsed,
@@ -55,6 +57,42 @@ describe("elapsedMs", () => {
 		const now = Date.parse("2026-01-01T00:00:10.000Z");
 		const ms = elapsedMs({ startTime: "2026-01-01T00:00:00.000Z" }, now);
 		expect(ms).toBe(10_000);
+	});
+});
+
+function agentRun(overrides: Partial<AgentRunSummary> = {}): AgentRunSummary {
+	return {
+		id: "sa-1",
+		runId: "sa-1",
+		name: "reviewer",
+		provider: "void",
+		harnessId: "void",
+		origin: "subagent",
+		state: "running",
+		startTime: "2026-01-01T00:00:00.000Z",
+		...overrides,
+	};
+}
+
+describe("cancelAgentRun", () => {
+	it("cancels a void subagent run through harnessRunManager.cancel, same as claude/codex", () => {
+		const cancelled: string[] = [];
+		const manager = { cancel: (runId: string) => cancelled.push(runId) } as unknown as HarnessRunManager;
+
+		const result = cancelAgentRun(agentRun({ harnessId: "void" }), manager, undefined);
+
+		expect(result).toEqual({ cancelled: true });
+		expect(cancelled).toEqual(["sa-1"]);
+	});
+
+	it("still cancels a non-void subagent run through harnessRunManager.cancel", () => {
+		const cancelled: string[] = [];
+		const manager = { cancel: (runId: string) => cancelled.push(runId) } as unknown as HarnessRunManager;
+
+		const result = cancelAgentRun(agentRun({ harnessId: "claude" }), manager, undefined);
+
+		expect(result).toEqual({ cancelled: true });
+		expect(cancelled).toEqual(["sa-1"]);
 	});
 });
 

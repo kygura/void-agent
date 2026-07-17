@@ -9,7 +9,7 @@ import type { Harness, HarnessEvent, HarnessRunConfig } from "../src/core/harnes
 import { nowIso } from "../src/core/harness/types.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
 import { createAgentSession } from "../src/core/sdk.js";
-import { codingTools } from "../src/core/tools/index.js";
+import { codingTools, readOnlyTools } from "../src/core/tools/index.js";
 import { resolveAgentTools } from "../src/core/tools/subagent.js";
 
 function writeAgentFile(dir: string, fileName: string, content: string): void {
@@ -130,6 +130,31 @@ describe("subagent tool", () => {
 		it("restricts to the named tools, ignoring unknown names", () => {
 			const tools = resolveAgentTools(cwd, ["read", "grep", "not-a-real-tool"]);
 			expect(tools.map((t) => t.name)).toEqual(["read", "grep"]);
+		});
+
+		it("maps Claude Code agent-file tool names to void registry names", () => {
+			const tools = resolveAgentTools(cwd, ["Read", "Grep", "Glob", "Bash", "Edit", "Write", "LS"]);
+			expect(tools.map((t) => t.name)).toEqual(["read", "grep", "find", "bash", "edit", "write", "ls"]);
+		});
+
+		it("matches tool names case-insensitively", () => {
+			const tools = resolveAgentTools(cwd, ["rEaD", "GREP"]);
+			expect(tools.map((t) => t.name)).toEqual(["read", "grep"]);
+		});
+
+		it("drops unknown tool names and warns instead of throwing", () => {
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const tools = resolveAgentTools(cwd, ["read", "WebFetch", "WebSearch", "Task"]);
+			expect(tools.map((t) => t.name)).toEqual(["read"]);
+			expect(errorSpy).toHaveBeenCalledTimes(3);
+			errorSpy.mockRestore();
+		});
+
+		it("falls back to read-only tools when nothing resolves", () => {
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const tools = resolveAgentTools(cwd, ["WebFetch", "WebSearch"]);
+			expect(tools.map((t) => t.name).sort()).toEqual(readOnlyTools.map((t) => t.name).sort());
+			errorSpy.mockRestore();
 		});
 	});
 

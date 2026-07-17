@@ -226,6 +226,11 @@ export class HarnessRunManager {
 		this.providers.set(harness.id, providerFromHarness(harness));
 	}
 
+	/** Returns a previously registered harness by id (e.g. "void", for its in-process prepareSpawn seam), or undefined. */
+	getHarness(id: string): Harness | undefined {
+		return this.harnesses.get(id);
+	}
+
 	/** Subscribes to every event across every run. Returns an unsubscribe function. */
 	subscribe(listener: HarnessEventListener): () => void {
 		return this.bus.on(HARNESS_EVENT_CHANNEL, (data) => listener(data as HarnessRunEvent));

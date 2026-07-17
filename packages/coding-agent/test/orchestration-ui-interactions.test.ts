@@ -414,4 +414,64 @@ describe("attached child-session interactions", () => {
 		update();
 		expect(stripAnsi(component.render(100).join("\n"))).toContain("second harness chunk");
 	});
+
+	// A "void" subagent-tool run (harnessId: "void") flows through HarnessRunManager exactly like a
+	// claude/codex subagent-tool run does - both land on SubagentRegistry with origin: "subagent",
+	// which openChildRun (interactive-mode.ts) always routes to kind: "external", never
+	// kind: "session" (that kind is reserved for the separate /agents orchestrationHost.spawn()
+	// path, covered by the "child-session entry origins" describe block above). This test pins that
+	// down for void specifically and proves the concrete improvement this change delivers: since the
+	// void branch now populates harnessRunId (previously always undefined for void), its transcript
+	// live-updates from HarnessRunManager events the same way a claude/codex run's does, instead of
+	// staying blank until the whole run finishes.
+	it("renders and live-updates output for a void subagent-tool run, staying kind: external", () => {
+		const source = fakeHost();
+		const terminal = new VirtualTerminal(100, 30);
+		const tui = new TUI(terminal);
+		let output = "first void chunk";
+		let update = () => {};
+		const summary: AgentRunSummary = {
+			id: "void-run",
+			runId: "void-hr-1",
+			name: "reviewer",
+			provider: "void",
+			harnessId: "void",
+			origin: "subagent",
+			state: "running",
+			startTime: "2026-01-01T00:00:00.000Z",
+			description: "review the patch",
+		};
+		const target = {
+			kind: "external" as const,
+			summary,
+			getCurrent: () => summary,
+			getOutputText: () => output,
+			subscribe: (listener: () => void) => {
+				update = listener;
+				return vi.fn();
+			},
+			cancel: () => ({ cancelled: true as const }),
+		} as unknown as ChildSessionTarget;
+		const component = new ChildSessionView(source.host, target, tui, KeybindingsManager.create(), {
+			parentName: "parent",
+			confirm: vi.fn(async () => true),
+			notify: vi.fn(),
+			detach: vi.fn(),
+			requestRender: vi.fn(),
+		});
+		cleanups.push(() => component.dispose());
+
+		// Live-updates, same as a harness-origin run - the improvement over the pre-change void path,
+		// which had no harnessRunId and so showed nothing until the run completed.
+		expect(stripAnsi(component.render(100).join("\n"))).toContain("first void chunk");
+		output = "first void chunk\nsecond void chunk";
+		update();
+		expect(stripAnsi(component.render(100).join("\n"))).toContain("second void chunk");
+
+		// Composer stays disabled - a subagent-tool run is a task run, not attached to a session, for
+		// every harness including void. There is no "resume composer" for it to submit through.
+		expect(stripAnsi(component.render(100).join("\n"))).toContain(
+			"task run — fire-and-forget, not attached to a session",
+		);
+	});
 });

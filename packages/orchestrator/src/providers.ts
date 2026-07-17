@@ -95,6 +95,8 @@ export function createProvider(
 			throw new Error(
 				"mock Providers require an explicit script and are not created by the process Provider factory",
 			);
+		case "void":
+			throw new Error("void Providers are registered directly by coding-agent's sdk.ts, not config-driven");
 	}
 	return new ConfiguredProvider(name, config, base, cache, authAdapter);
 }

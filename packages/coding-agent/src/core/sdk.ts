@@ -6,7 +6,7 @@ import { AgentSession } from "./agent-session.js";
 import { AuthStorage } from "./auth-storage.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.js";
-import { createDefaultHarnesses, HarnessRunManager } from "./harness/index.js";
+import { createDefaultHarnesses, HarnessRunManager, VoidHarness } from "./harness/index.js";
 import { convertToLlm } from "./messages.js";
 import { ModelRegistry } from "./model-registry.js";
 import { findExactModelReferenceMatch, findInitialModel } from "./model-resolver.js";
@@ -282,9 +282,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		// createAgentSession) to avoid a module cycle: subagent.ts -> sdk.ts -> subagent.ts.
 		subagentRegistry = new SubagentRegistry();
 		harnessRunManager = options.harnessRunManager ?? new HarnessRunManager(join(agentDir, "harness-sessions"));
-		if (!options.harnessRunManager) {
-			for (const harness of createDefaultHarnesses()) harnessRunManager.registerHarness(harness);
-		}
 		const spawnVoidChild: SpawnVoidChild = async (childConfig) => {
 			const childModel = childConfig.modelId
 				? (findExactModelReferenceMatch(childConfig.modelId, modelRegistry.getAll()) ?? model)
@@ -310,12 +307,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			});
 			return childSession;
 		};
+		if (!options.harnessRunManager) {
+			// VoidHarness needs spawnVoidChild at construction, which createDefaultHarnesses() (a
+			// zero-arg factory shared by callers with no AgentSession context) can't supply - so it's
+			// registered here directly instead of being folded into that factory.
+			for (const harness of createDefaultHarnesses()) harnessRunManager.registerHarness(harness);
+			harnessRunManager.registerHarness(new VoidHarness(spawnVoidChild));
+		}
 		subagentTool = createSubagentToolDefinition({
 			cwd,
 			harnessRunManager,
 			registry: subagentRegistry,
 			parentSessionRef,
-			spawnVoidChild,
 		});
 		subagentOutputTool = createSubagentOutputToolDefinition(subagentRegistry);
 	}

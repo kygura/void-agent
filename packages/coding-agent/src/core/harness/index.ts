@@ -30,6 +30,7 @@ export {
 } from "./runs.js";
 export type { Harness, HarnessEvent, HarnessEventKind, HarnessRunConfig, HarnessUsage } from "./types.js";
 export { nowIso } from "./types.js";
+export { VoidHarness, type VoidSpawnConfig } from "./void.js";
 
 import { ClaudeHarness } from "./claude.js";
 import { CodexHarness } from "./codex.js";

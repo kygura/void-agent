@@ -52,9 +52,6 @@ export function cancelAgentRun(
 	}
 	try {
 		if (run.origin === "subagent") {
-			if (run.harnessId === "void") {
-				return { cancelled: false, reason: `cannot cancel in-process subagent ${run.name} from here` };
-			}
 			if (harnessRunManager === undefined) {
 				return { cancelled: false, reason: `cannot cancel ${run.name}: harness manager is unavailable` };
 			}

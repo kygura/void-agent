@@ -1,8 +1,9 @@
 /**
  * subagent / subagent_output tools: spawn a child coding agent to run a
- * scoped task, either in-process (the "void" harness, via a fresh
- * AgentSession) or through an external CLI harness (claude, codex, or a
- * registered generic harness) via HarnessRunManager. A run either blocks and
+ * scoped task, either in-process (the "void" harness) or through an external
+ * CLI harness (claude, codex, or a registered generic harness) - both flow
+ * through HarnessRunManager.startRun, which is what gives every child a live
+ * event stream, cancel, and background-notify. A run either blocks and
  * returns the child's final text, or is kicked off in the background and
  * later notifies the parent session on completion.
  */
@@ -12,9 +13,9 @@ import { type Static, Type } from "@sinclair/typebox";
 import type { AgentSession } from "../agent-session.js";
 import { discoverAgents } from "../agents.js";
 import type { ToolDefinition } from "../extensions/types.js";
-import type { HarnessRun, HarnessRunManager } from "../harness/index.js";
+import type { HarnessRun, HarnessRunManager, VoidHarness } from "../harness/index.js";
 import { nowIso } from "../harness/types.js";
-import { createAllTools, createCodingTools, type Tool, type ToolName } from "./index.js";
+import { createAllTools, createCodingTools, createReadOnlyTools, type Tool, type ToolName } from "./index.js";
 import { truncateHead } from "./truncate.js";
 
 /** Cap applied to the final text embedded in a background-completion notification. */
@@ -34,9 +35,7 @@ export interface SubagentRunRecord {
 	endTime?: string;
 	finalText?: string;
 	error?: string;
-	/** Session file for the child, when spawned via the "void" harness. */
-	childSessionFilePath?: string;
-	/** Underlying HarnessRunManager run id, when spawned via an external harness. */
+	/** Underlying HarnessRunManager run id. Set for every run - both "void" and external harnesses spawn through it. */
 	harnessRunId?: string;
 }
 
@@ -79,11 +78,34 @@ export class SubagentRegistry {
 	}
 }
 
+/**
+ * Maps a `tools:` entry (case-insensitive) to a void registry key. Covers both void's own
+ * lowercase names (read, bash, edit, write, grep, find, ls) and the Claude Code agent-file names
+ * (Read, Grep, Glob, Bash, Edit, Write, LS) that `~/.claude/agents/*.md` files use.
+ */
+const TOOL_NAME_ALIASES: Record<string, ToolName> = {
+	read: "read",
+	bash: "bash",
+	edit: "edit",
+	write: "write",
+	grep: "grep",
+	find: "find",
+	ls: "ls",
+	glob: "find",
+};
+
 /** Resolves an agent definition's `tools` list to concrete cwd-bound Tool instances. Undefined/empty = all coding tools. */
 export function resolveAgentTools(cwd: string, toolNames: string[] | undefined): Tool[] {
 	if (!toolNames || toolNames.length === 0) return createCodingTools(cwd);
 	const all = createAllTools(cwd);
-	return toolNames.map((name) => all[name as ToolName]).filter((t): t is Tool => t !== undefined);
+	const resolved: Tool[] = [];
+	for (const name of toolNames) {
+		const key = TOOL_NAME_ALIASES[name.toLowerCase()];
+		const tool = key ? all[key] : undefined;
+		if (tool) resolved.push(tool);
+		else console.error(`resolveAgentTools: unknown tool name "${name}", dropping it`);
+	}
+	return resolved.length > 0 ? resolved : createReadOnlyTools(cwd);
 }
 
 function formatAgentList(cwd: string): string {
@@ -104,21 +126,6 @@ function truncateForNotification(text: string): string {
 	return `${result.content}\n\n[truncated: showing first ${result.outputBytes} of ${result.totalBytes} bytes]`;
 }
 
-async function withAbort<T>(work: Promise<T>, signal: AbortSignal | undefined, onAbort: () => void): Promise<T> {
-	if (!signal) return work;
-	const listener = () => onAbort();
-	if (signal.aborted) {
-		onAbort();
-	} else {
-		signal.addEventListener("abort", listener, { once: true });
-	}
-	try {
-		return await work;
-	} finally {
-		signal.removeEventListener("abort", listener);
-	}
-}
-
 /** Spawns a fresh in-process child AgentSession. Implemented by createAgentSession's caller (sdk.ts) to avoid a module cycle. */
 export type SpawnVoidChild = (config: {
 	systemPrompt?: string;
@@ -132,42 +139,11 @@ export interface SubagentToolOptions {
 	registry: SubagentRegistry;
 	/** Updated by the caller once the owning AgentSession exists (forward reference, mirrors extensionRunnerRef). */
 	parentSessionRef: { current?: AgentSession };
-	spawnVoidChild: SpawnVoidChild;
 }
 
 interface ChildRunResult {
 	text: string;
 	elapsedMs: number;
-	tokens?: number;
-	sessionFilePath?: string;
-}
-
-async function runVoidChild(
-	opts: SubagentToolOptions,
-	def: ReturnType<typeof discoverAgents>[number] | undefined,
-	prompt: string,
-	signal: AbortSignal | undefined,
-): Promise<ChildRunResult> {
-	const startedAt = Date.now();
-	const session = await opts.spawnVoidChild({
-		systemPrompt: def?.systemPrompt,
-		toolNames: def?.tools,
-		modelId: def?.model,
-	});
-	try {
-		await withAbort(session.prompt(prompt), signal, () => {
-			void session.abort();
-		});
-		const stats = session.getSessionStats();
-		return {
-			text: session.getLastAssistantText() ?? "",
-			elapsedMs: Date.now() - startedAt,
-			tokens: stats.tokens.total,
-			sessionFilePath: session.sessionFile,
-		};
-	} finally {
-		session.dispose();
-	}
 }
 
 /**
@@ -236,7 +212,7 @@ function backgroundResult(id: string, agent: string) {
 }
 
 function foregroundResult(id: string, agent: string, result: ChildRunResult) {
-	const stats = `[subagent ${id} | agent=${agent} | elapsed=${formatElapsed(result.elapsedMs)}${result.tokens !== undefined ? ` | tokens=${result.tokens}` : ""}]`;
+	const stats = `[subagent ${id} | agent=${agent} | elapsed=${formatElapsed(result.elapsedMs)}]`;
 	const text = `${result.text || "(no output)"}\n\n${stats}`;
 	return { content: [{ type: "text" as const, text }], details: undefined };
 }
@@ -273,63 +249,47 @@ export function createSubagentToolDefinition(opts: SubagentToolOptions): ToolDef
 			const id = randomUUID();
 			const agentLabel = def?.name ?? "general";
 
-			if (harnessId === "void") {
-				if (background) {
-					opts.registry.start({
-						id,
-						agent: agentLabel,
-						description: params.description,
-						harness: harnessId,
-						background: true,
-					});
-					void runVoidChild(opts, def, params.prompt, undefined)
-						.then((result) => {
-							opts.registry.finish(id, {
-								state: "done",
-								finalText: result.text,
-								childSessionFilePath: result.sessionFilePath,
-							});
-							return notifyParent(opts, id, agentLabel, "done", result.text);
-						})
-						.catch((error) => {
-							const message = error instanceof Error ? error.message : String(error);
-							opts.registry.finish(id, { state: "failed", error: message });
-							return notifyParent(opts, id, agentLabel, "failed", message);
-						});
-					return backgroundResult(id, agentLabel);
-				}
-
-				opts.registry.start({
-					id,
-					agent: agentLabel,
-					description: params.description,
-					harness: harnessId,
-					background: false,
-				});
-				try {
-					const result = await runVoidChild(opts, def, params.prompt, signal);
-					opts.registry.finish(id, {
-						state: "done",
-						finalText: result.text,
-						childSessionFilePath: result.sessionFilePath,
-					});
-					return foregroundResult(id, agentLabel, result);
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					opts.registry.finish(id, { state: "failed", error: message });
-					throw new Error(`subagent: run failed: ${message}`);
-				}
-			}
-
-			// External harness (claude, codex, or a registered generic harness).
-			const fullPrompt = def?.systemPrompt ? `${def.systemPrompt}\n\n${params.prompt}` : params.prompt;
+			// Both the in-process "void" harness and external CLI harnesses (claude, codex, a
+			// registered generic harness) start through the same HarnessRunManager.startRun seam -
+			// only how the run config is built differs. "void" has no CLI to hand a system prompt
+			// to, so the agent def's systemPrompt/tools/model travel out of band via
+			// VoidHarness.prepareSpawn(token, ...), keyed by a token threaded through extraArgs (see
+			// VoidHarness's doc comment for the full handoff). External harnesses instead prepend the
+			// system prompt directly onto the conversation's first prompt.
 			let runId: string;
 			try {
-				runId = opts.harnessRunManager.startRun(harnessId, {
-					prompt: fullPrompt,
-					model: def?.model,
-					cwd: opts.cwd,
-				});
+				if (harnessId === "void") {
+					const voidHarness = opts.harnessRunManager.getHarness("void") as VoidHarness | undefined;
+					if (!voidHarness) throw new Error('"void" harness is not registered on this session');
+					const token = randomUUID();
+					voidHarness.prepareSpawn(token, {
+						systemPrompt: def?.systemPrompt,
+						toolNames: def?.tools,
+						modelId: def?.model,
+					});
+					try {
+						runId = opts.harnessRunManager.startRun("void", {
+							prompt: params.prompt,
+							model: def?.model,
+							cwd: opts.cwd,
+							extraArgs: [token],
+						});
+					} catch (error) {
+						// startRun can throw synchronously before VoidHarness.start() ever runs (manager
+						// closing, unknown harness, malformed config) - resolveSession() is the only place
+						// that consumes the pendingSpawns token, so on this path it never fires and the
+						// token would otherwise leak forever.
+						voidHarness.cancelSpawn(token);
+						throw error;
+					}
+				} else {
+					const fullPrompt = def?.systemPrompt ? `${def.systemPrompt}\n\n${params.prompt}` : params.prompt;
+					runId = opts.harnessRunManager.startRun(harnessId, {
+						prompt: fullPrompt,
+						model: def?.model,
+						cwd: opts.cwd,
+					});
+				}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(`subagent: could not start harness "${harnessId}": ${message}`);
