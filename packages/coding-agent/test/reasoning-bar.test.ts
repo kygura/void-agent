@@ -4,10 +4,12 @@ import stripAnsi from "strip-ansi";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
 	buildReasoningBar,
+	buildReasoningGauge,
 	ReasoningBarComponent,
 	type ReasoningBarData,
 	stepThinkingLevel,
 } from "../src/modes/interactive/components/reasoning-bar.js";
+import { getActiveSplashBandStyles } from "../src/modes/interactive/components/splash.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
 const LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -60,6 +62,19 @@ describe("buildReasoningBar", () => {
 		expect(stripAnsi(buildReasoningBar(data, 8))).toBe("█████░");
 		for (const width of [0, 1, 3, 6, 8, 20]) {
 			expect(visibleWidth(buildReasoningBar(data, width))).toBeLessThanOrEqual(width);
+		}
+	});
+
+	it("renders a compact gauge without a duplicate level label", () => {
+		const line = buildReasoningGauge(baseData({ thinkingLevel: "medium" }), 80);
+		expect(stripAnsi(line)).toBe("████░░");
+		expect(line).not.toContain("medium");
+	});
+
+	it("always colors filled blocks from the active splash palette", () => {
+		const line = buildReasoningGauge(baseData({ thinkingLevel: "xhigh" }), 80);
+		for (const style of getActiveSplashBandStyles()) {
+			expect(line).toContain(style("█"));
 		}
 	});
 });

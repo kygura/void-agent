@@ -6,7 +6,7 @@ export interface ProviderPalette {
 }
 
 const PALETTES = {
-	violet: { base: "#A78BFA", strong: "#E9D5FF" },
+	anthropic: { base: "#C2410C", strong: "#FDBA74" },
 	emerald: { base: "#34D399", strong: "#A7F3D0" },
 	cyan: { base: "#22D3EE", strong: "#A5F3FC" },
 	amber: { base: "#F59E0B", strong: "#FDE68A" },
@@ -16,19 +16,21 @@ const PALETTES = {
 	magenta: { base: "#E879F9", strong: "#F5D0FE" },
 } as const satisfies Record<string, ProviderPalette>;
 
+const PROVIDER_PALETTE_RULES: Array<{ match: RegExp; palette: keyof typeof PALETTES }> = [
+	{ match: /anthropic|claude/i, palette: "anthropic" },
+	{ match: /openai|codex/i, palette: "emerald" },
+	{ match: /google|gemini/i, palette: "cyan" },
+	{ match: /^(?:void|pi)(?:-|$)/i, palette: "amber" },
+	{ match: /github|copilot/i, palette: "blue" },
+	{ match: /openrouter/i, palette: "rose" },
+	{ match: /amazon|bedrock/i, palette: "orange" },
+	{ match: /mistral/i, palette: "magenta" },
+];
+
 const FALLBACK_PALETTES = Object.values(PALETTES);
 
 function providerFamily(provider: string): keyof typeof PALETTES | undefined {
-	const normalized = provider.toLowerCase();
-	if (normalized.includes("anthropic") || normalized.includes("claude")) return "violet";
-	if (normalized.includes("openai") || normalized.includes("codex")) return "emerald";
-	if (normalized.includes("google") || normalized.includes("gemini")) return "cyan";
-	if (normalized === "void" || normalized === "pi" || normalized.startsWith("pi-")) return "amber";
-	if (normalized.includes("github") || normalized.includes("copilot")) return "blue";
-	if (normalized.includes("openrouter")) return "rose";
-	if (normalized.includes("amazon") || normalized.includes("bedrock")) return "orange";
-	if (normalized.includes("mistral")) return "magenta";
-	return undefined;
+	return PROVIDER_PALETTE_RULES.find((rule) => rule.match.test(provider))?.palette;
 }
 
 function stableHash(value: string): number {

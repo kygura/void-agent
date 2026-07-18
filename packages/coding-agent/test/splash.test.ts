@@ -13,6 +13,7 @@ import {
 	resetSplashAnimation,
 	SplashAnimator,
 	SplashComponent,
+	WORDMARK_ENTRANCE_MS,
 } from "../src/modes/interactive/components/splash.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
@@ -78,6 +79,45 @@ describe("startup splash", () => {
 		const first = renderSplash(50, 18, FIXED_TIME);
 		const second = renderSplash(50, 18, FIXED_TIME + 400);
 		expect(second).not.toBe(first);
+	});
+
+	test("animates wordmark halves from opposite sides deterministically", () => {
+		resetSplashAnimation();
+		const initial = stripAnsi(renderSplash(50, 18, FIXED_TIME)).split("\n")[1]!;
+		const settled = stripAnsi(renderSplash(50, 18, FIXED_TIME + WORDMARK_ENTRANCE_MS)).split("\n")[1]!;
+		expect(initial).not.toBe(settled);
+		expect(settled).toContain("V O I D");
+
+		resetSplashAnimation();
+		const replay = stripAnsi(renderSplash(50, 18, FIXED_TIME)).split("\n")[1]!;
+		expect(replay).toBe(initial);
+	});
+
+	test("renders rotating faceted spheres within the art bounds", () => {
+		resetSplashAnimation();
+		const first = stripAnsi(renderSplash(60, 20, FIXED_TIME));
+		const later = stripAnsi(renderSplash(60, 20, FIXED_TIME + FRAME_INTERVAL_MS * 5));
+		expect(later).not.toBe(first);
+		expect(first).toMatch(/[·.:oO0]/);
+		expect(first.split("\n").every((line) => visibleWidth(line) <= 60)).toBe(true);
+		expect(later.split("\n").every((line) => visibleWidth(line) <= 60)).toBe(true);
+	});
+
+	test("starts each component wordmark entrance at its own lifecycle epoch", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(FIXED_TIME);
+		const requestRender = vi.fn();
+		const terminal = { rows: 20 } as unknown as Terminal;
+
+		const first = new SplashComponent({ terminal, requestRender });
+		const firstInitial = stripAnsi(first.render(50)[1]!);
+		vi.advanceTimersByTime(WORDMARK_ENTRANCE_MS / 2);
+		first.stop();
+
+		const second = new SplashComponent({ terminal, requestRender });
+		const secondInitial = stripAnsi(second.render(50)[1]!);
+		expect(secondInitial).toBe(firstInitial);
+		second.stop();
 	});
 
 	test("uses the static wordmark below the minimum terminal height", () => {

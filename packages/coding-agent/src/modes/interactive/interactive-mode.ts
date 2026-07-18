@@ -94,7 +94,7 @@ import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { PermissionPromptComponent } from "./components/permission-prompt.js";
-import { ReasoningBarComponent, stepThinkingLevel } from "./components/reasoning-bar.js";
+import { stepThinkingLevel } from "./components/reasoning-bar.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
@@ -498,15 +498,6 @@ export class InteractiveMode {
 		// Both are needed: fd for autocomplete, rg for grep tool and bash commands
 		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
 		this.fdPath = fdPath;
-
-		// Reasoning gauge sits at the very top of the TUI, above the header
-		this.ui.addChild(
-			new ReasoningBarComponent(() => ({
-				modelSupportsThinking: this.session.supportsThinking(),
-				thinkingLevel: this.session.thinkingLevel,
-				availableLevels: this.session.getAvailableThinkingLevels(),
-			})),
-		);
 
 		// Add header container as first child
 		this.ui.addChild(this.headerContainer);

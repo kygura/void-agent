@@ -7,7 +7,9 @@ export const MIN_WIDTH = 30;
 export const MIN_HEIGHT = 11;
 export const MAX_WIDTH = 60;
 export const MAX_HEIGHT = 22;
+export const WORDMARK_ENTRANCE_MS = 900;
 
+const WORDMARK_TRAVEL_MS = WORDMARK_ENTRANCE_MS;
 const ROTATION_FREQUENCY = 0.7;
 const ROTATION_DAMPING = 0.8;
 const SETTLE_POSITION = 0.01;
@@ -21,18 +23,18 @@ const BACKGROUND_DEPTH_BIAS = 100;
 type Vec3 = { x: number; y: number; z: number };
 type Point = { x: number; y: number };
 type AxisSpring = { angle: number; velocity: number; target: number };
-type Style = (text: string) => string;
+export type SplashBandStyle = (text: string) => string;
 
 type SplashPalette = {
 	bands: Array<{ hex: string; bold?: boolean }>;
-	spheres: [string, string, string];
+	spheres: [string, string, string, string, string, string];
 };
 
 type CompiledSplashPalette = {
-	bands: Style[];
-	spheres: Style[];
-	combined: Style[];
-	header: Style;
+	bands: SplashBandStyle[];
+	spheres: SplashBandStyle[];
+	combined: SplashBandStyle[];
+	header: SplashBandStyle;
 };
 
 // Curated splash palettes. Each is a coherent dark -> bright shading ramp:
@@ -43,62 +45,62 @@ const SPLASH_PALETTES: SplashPalette[] = [
 	{
 		// amber: ember -> rust -> soft red -> amber -> yellow -> pale highlight
 		bands: [
-			{ hex: "#6B4632" },
-			{ hex: "#A05A46" },
-			{ hex: "#C96A55" },
-			{ hex: "#FFB454" },
-			{ hex: "#E8C56E", bold: true },
-			{ hex: "#F5DFA0", bold: true },
+			{ hex: "#7A2E1C" },
+			{ hex: "#B23B24" },
+			{ hex: "#E0522A" },
+			{ hex: "#FF8A34" },
+			{ hex: "#FFC247", bold: true },
+			{ hex: "#FFF0B2", bold: true },
 		],
-		spheres: ["#6B4632", "#8A5A46", "#A66A50"],
+		spheres: ["#6B2D1F", "#A63D24", "#D45A2A", "#F07832", "#FFB454", "#FFE0A3"],
 	},
 	{
 		// green: moss -> leaf -> spring -> mint highlight
 		bands: [
-			{ hex: "#33502F" },
-			{ hex: "#4A7040" },
-			{ hex: "#5E9450" },
-			{ hex: "#7FCB6E" },
-			{ hex: "#A8E08A", bold: true },
-			{ hex: "#D9F5BE", bold: true },
+			{ hex: "#144A2C" },
+			{ hex: "#1D793F" },
+			{ hex: "#2DAF55" },
+			{ hex: "#64E17A" },
+			{ hex: "#A4F5A2", bold: true },
+			{ hex: "#E1FFDB", bold: true },
 		],
-		spheres: ["#33502F", "#46663C", "#587F49"],
+		spheres: ["#164A2A", "#19733A", "#20A950", "#55D66F", "#9AF29A", "#D9FFD0"],
 	},
 	{
 		// blue: midnight -> steel -> sky -> ice highlight
 		bands: [
-			{ hex: "#2E3F5C" },
-			{ hex: "#3D5A80" },
-			{ hex: "#4F7CAC" },
-			{ hex: "#64A6E8" },
-			{ hex: "#98C9F0", bold: true },
-			{ hex: "#CFE7FA", bold: true },
+			{ hex: "#162A66" },
+			{ hex: "#214C9A" },
+			{ hex: "#2D78CC" },
+			{ hex: "#56B7F0" },
+			{ hex: "#A6E2FF", bold: true },
+			{ hex: "#E4FAFF", bold: true },
 		],
-		spheres: ["#2E3F5C", "#3A5273", "#48688F"],
+		spheres: ["#182E66", "#2456A5", "#2C82D4", "#51B8F5", "#98E0FF", "#D8F6FF"],
 	},
 	{
 		// red: maroon -> brick -> coral -> blush highlight
 		bands: [
-			{ hex: "#5C2A2A" },
-			{ hex: "#8A3A3A" },
-			{ hex: "#B54848" },
-			{ hex: "#E85E55" },
-			{ hex: "#F09080", bold: true },
-			{ hex: "#F8C8B8", bold: true },
+			{ hex: "#64152D" },
+			{ hex: "#9D1E3D" },
+			{ hex: "#D32F52" },
+			{ hex: "#F05B69" },
+			{ hex: "#FF9B9B", bold: true },
+			{ hex: "#FFD0D0", bold: true },
 		],
-		spheres: ["#5C2A2A", "#763434", "#914040"],
+		spheres: ["#64152D", "#9D1E3D", "#D32F52", "#F05B69", "#FF9B9B", "#FFD0D0"],
 	},
 	{
 		// violet: plum -> orchid -> lavender highlight
 		bands: [
-			{ hex: "#443055" },
-			{ hex: "#5F4478" },
-			{ hex: "#7C58A0" },
-			{ hex: "#A97FE0" },
-			{ hex: "#C7A6F0", bold: true },
-			{ hex: "#E6D6FA", bold: true },
+			{ hex: "#35105F" },
+			{ hex: "#5D1FA0" },
+			{ hex: "#8A36D1" },
+			{ hex: "#B95DEB" },
+			{ hex: "#D5A1FF", bold: true },
+			{ hex: "#F1DDFF", bold: true },
 		],
-		spheres: ["#443055", "#553D6A", "#684C82"],
+		spheres: ["#32145F", "#5A2194", "#8538C2", "#B45BEA", "#D6A1FF", "#F1DDFF"],
 	},
 ];
 
@@ -123,6 +125,11 @@ let activeStyles = compileSplashPalette(activePalette);
 function selectSplashPalette(): void {
 	activePalette = pickSplashPalette();
 	activeStyles = compileSplashPalette(activePalette);
+}
+
+/** Return the six styles used by the currently active splash palette. */
+export function getActiveSplashBandStyles(): readonly SplashBandStyle[] {
+	return activeStyles.bands;
 }
 
 // Prism crystal: two pyramids stitched at a shared square base (a bipyramid).
@@ -162,7 +169,49 @@ const BACKGROUND_SPHERES = [
 	{ x: 2.7, y: 1.65, radius: 0.3, drift: 0.3, speed: 0.3, phase: 4.4 },
 ];
 
-const SPHERE_GLYPHS = ["·", "o", "O"];
+const SPHERE_BAND_GLYPHS = ["·", ".", ":", "o", "O", "0"];
+
+type Triangle = [number, number, number];
+
+function createSphereMesh(): { vertices: Vec3[]; faces: Triangle[] } {
+	const vertices: Vec3[] = [{ x: 0, y: 1, z: 0 }];
+	const faces: Triangle[] = [];
+	const sides = 8;
+	const rings = 3;
+
+	for (let ring = 1; ring <= rings; ring++) {
+		const latitude = (ring * Math.PI) / (rings + 1);
+		for (let side = 0; side < sides; side++) {
+			const longitude = (side * Math.PI * 2) / sides;
+			vertices.push({
+				x: Math.sin(latitude) * Math.cos(longitude),
+				y: Math.cos(latitude),
+				z: Math.sin(latitude) * Math.sin(longitude),
+			});
+		}
+	}
+
+	const bottom = vertices.length;
+	vertices.push({ x: 0, y: -1, z: 0 });
+	for (let side = 0; side < sides; side++) {
+		const next = (side + 1) % sides;
+		faces.push([0, 1 + side, 1 + next]);
+		const lowerRing = 1 + (rings - 1) * sides;
+		faces.push([bottom, lowerRing + next, lowerRing + side]);
+	}
+	for (let ring = 0; ring < rings - 1; ring++) {
+		const current = 1 + ring * sides;
+		const nextRing = current + sides;
+		for (let side = 0; side < sides; side++) {
+			const next = (side + 1) % sides;
+			faces.push([current + side, nextRing + side, current + next]);
+			faces.push([current + next, nextRing + side, nextRing + next]);
+		}
+	}
+	return { vertices, faces };
+}
+
+const SPHERE_MESH = createSphereMesh();
 
 function randomTarget(from: number): number {
 	let delta = Math.PI / 2 + (Math.random() * (Math.PI * 3)) / 2;
@@ -209,16 +258,18 @@ export class SplashAnimator {
 }
 
 let defaultAnimator = new SplashAnimator();
+let splashStartTime: number | undefined;
 
 export function resetSplashAnimation(): void {
 	defaultAnimator = new SplashAnimator();
+	splashStartTime = undefined;
 }
 
 export function fits(width: number, height: number): boolean {
 	return width >= MIN_WIDTH && height >= MIN_HEIGHT;
 }
 
-function styleForHex(hex: string, bold = false): Style {
+function styleForHex(hex: string, bold = false): SplashBandStyle {
 	const r = Number.parseInt(hex.slice(1, 3), 16);
 	const g = Number.parseInt(hex.slice(3, 5), 16);
 	const b = Number.parseInt(hex.slice(5, 7), 16);
@@ -286,14 +337,14 @@ function edge(a: Point, b: Point, c: Point): number {
 	return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 }
 
-function shade(a: Vec3, b: Vec3, c: Vec3): number {
+function shade(a: Vec3, b: Vec3, c: Vec3, origin: Vec3 = { x: 0, y: 0, z: 0 }): number {
 	let normal = normalize(cross(sub(b, a), sub(c, a)));
 	const centroid = {
 		x: (a.x + b.x + c.x) / 3,
 		y: (a.y + b.y + c.y) / 3,
 		z: (a.z + b.z + c.z) / 3,
 	};
-	if (dot(normal, centroid) < 0) normal = { x: -normal.x, y: -normal.y, z: -normal.z };
+	if (dot(normal, sub(centroid, origin)) < 0) normal = { x: -normal.x, y: -normal.y, z: -normal.z };
 	const luminance = dot(normal, LIGHT_DIRECTION);
 	if (luminance < -0.1) return 0;
 	if (luminance < 0.15) return 1;
@@ -303,9 +354,10 @@ function shade(a: Vec3, b: Vec3, c: Vec3): number {
 	return 5;
 }
 
-function drawSphere(
+function drawFacetedSphere(
 	center: Vec3,
 	radius: number,
+	angles: readonly [number, number, number],
 	centerX: number,
 	centerY: number,
 	scale: number,
@@ -316,33 +368,35 @@ function drawSphere(
 	styles: number[],
 	depth: number[],
 ): void {
-	const projected = project(center, centerX, centerY, scale);
-	let radiusX = radius * scale * 2;
-	let radiusY = radius * scale;
-	if (radiusY < 1) {
-		radiusX = 2;
-		radiusY = 1;
-	}
-	const minX = clamp(Math.floor(projected.x - radiusX), 0, width - 1);
-	const maxX = clamp(Math.ceil(projected.x + radiusX), 0, width - 1);
-	const minY = clamp(Math.floor(projected.y - radiusY), 0, height - 1);
-	const maxY = clamp(Math.ceil(projected.y + radiusY), 0, height - 1);
-	for (let y = minY; y <= maxY; y++) {
-		for (let x = minX; x <= maxX; x++) {
-			const u = (x - projected.x) / radiusX;
-			const v = (y - projected.y) / radiusY;
-			const distanceSquared = u * u + v * v;
-			if (distanceSquared > 1) continue;
-			const normalZ = Math.sqrt(1 - distanceSquared);
-			const cell = y * width + x;
-			const cellDepth = center.z + normalZ * radius - BACKGROUND_DEPTH_BIAS;
-			if (cellDepth <= depth[cell]) continue;
-			depth[cell] = cellDepth;
-			const luminance = dot({ x: u, y: -v, z: normalZ }, LIGHT_DIRECTION);
-			const shadeIndex = luminance > 0.65 ? 2 : luminance > 0.25 ? 1 : 0;
-			glyphs[cell] = SPHERE_GLYPHS[shadeIndex];
-			styles[cell] = styleBase + shadeIndex;
-		}
+	const vertices = SPHERE_MESH.vertices.map((vertex) => {
+		const rotated = rotateZ(rotateY(rotateX(vertex, angles[0]), angles[1]), angles[2]);
+		return {
+			x: center.x + rotated.x * radius,
+			y: center.y + rotated.y * radius,
+			z: center.z + rotated.z * radius,
+		};
+	});
+
+	for (const face of SPHERE_MESH.faces) {
+		const a = vertices[face[0]]!;
+		const b = vertices[face[1]]!;
+		const c = vertices[face[2]]!;
+		rasterize(
+			project(a, centerX, centerY, scale),
+			project(b, centerX, centerY, scale),
+			project(c, centerX, centerY, scale),
+			a.z - BACKGROUND_DEPTH_BIAS,
+			b.z - BACKGROUND_DEPTH_BIAS,
+			c.z - BACKGROUND_DEPTH_BIAS,
+			shade(a, b, c, center),
+			width,
+			height,
+			SPHERE_BAND_GLYPHS,
+			glyphs,
+			styles,
+			depth,
+			styleBase,
+		);
 	}
 }
 
@@ -360,6 +414,7 @@ function rasterize(
 	glyphs: string[],
 	styles: number[],
 	depth: number[],
+	styleOffset = 0,
 ): void {
 	const area = edge(p0, p1, p2);
 	if (area === 0) return;
@@ -378,13 +433,13 @@ function rasterize(
 			const cellDepth = weight0 * z0 + weight1 * z1 + weight2 * z2;
 			if (cellDepth <= depth[cell]) continue;
 			depth[cell] = cellDepth;
-			styles[cell] = shadeIndex;
+			styles[cell] = styleOffset + shadeIndex;
 			glyphs[cell] = bandGlyphs[shadeIndex];
 		}
 	}
 }
 
-function styleLine(glyphs: string[], styles: number[], palette: Style[]): string {
+function styleLine(glyphs: string[], styles: number[], palette: SplashBandStyle[]): string {
 	let output = "";
 	let start = 0;
 	while (start < glyphs.length) {
@@ -398,11 +453,63 @@ function styleLine(glyphs: string[], styles: number[], palette: Style[]): string
 	return output;
 }
 
+function renderAnimatedWordmark(width: number, now: number, startTime?: number): string {
+	if (startTime === undefined) {
+		if (splashStartTime === undefined) splashStartTime = now;
+		startTime = splashStartTime;
+	}
+	const elapsed = Math.max(0, now - startTime);
+	const progress = clamp(elapsed / WORDMARK_TRAVEL_MS, 0, 1);
+	const eased = 1 - (1 - progress) ** 3;
+	const text = APP_NAME.toUpperCase().split("").join(" ");
+	const midpoint = Math.ceil(text.length / 2);
+	const left = text.slice(0, midpoint);
+	const right = text.slice(midpoint);
+	const targetLeft = Math.floor((width - text.length) / 2);
+	const targetRight = targetLeft + midpoint;
+	const cells = Array<string>(width).fill(" ");
+	const styles: Array<SplashBandStyle | undefined> = Array<SplashBandStyle | undefined>(width).fill(undefined);
+
+	const place = (part: string, start: number, style: SplashBandStyle): void => {
+		for (let index = 0; index < part.length; index++) {
+			const position = start + index;
+			if (position < 0 || position >= width) continue;
+			cells[position] = part[index]!;
+			styles[position] = style;
+		}
+	};
+
+	const leftStart = Math.round(targetLeft - (1 - eased) * (targetLeft + left.length));
+	const rightStart = Math.round(targetRight + (1 - eased) * (width - targetRight));
+	place(left, leftStart, activeStyles.header);
+	place(right, rightStart, activeStyles.header);
+
+	const sweepDuration = 720;
+	const sweepElapsed = elapsed - WORDMARK_ENTRANCE_MS;
+	if (sweepElapsed >= 0 && sweepElapsed <= sweepDuration) {
+		const sweepCenter = (sweepElapsed / sweepDuration) * (text.length + 4) - 2;
+		for (let index = 0; index < text.length; index++) {
+			const position = targetLeft + index;
+			if (Math.abs(index - sweepCenter) <= 1 && position >= 0 && position < width && cells[position] !== " ") {
+				styles[position] = activeStyles.bands[5];
+			}
+		}
+	}
+
+	let output = "";
+	for (let index = 0; index < width; index++) {
+		const style = styles[index];
+		output += style === undefined ? cells[index] : style(cells[index]!);
+	}
+	return output;
+}
+
 export function renderSplash(
 	width: number,
 	height: number,
 	now: number,
 	animator: SplashAnimator = defaultAnimator,
+	wordmarkStartTime?: number,
 ): string {
 	if (!fits(width, height)) return "";
 	const boxWidth = Math.min(width, MAX_WIDTH);
@@ -422,13 +529,19 @@ export function renderSplash(
 	const seconds = now / 1000;
 	for (const sphere of BACKGROUND_SPHERES) {
 		const theta = sphere.phase + seconds * sphere.speed;
-		drawSphere(
+		const angles: [number, number, number] = [
+			seconds * sphere.speed * 1.17 + sphere.phase,
+			seconds * sphere.speed * 0.83 - sphere.phase,
+			seconds * sphere.speed * 0.61 + sphere.phase * 0.5,
+		];
+		drawFacetedSphere(
 			{
 				x: sphere.x + sphere.drift * Math.cos(theta),
 				y: sphere.y + sphere.drift * Math.sin(theta),
 				z: 0,
 			},
 			sphere.radius,
+			angles,
 			centerX,
 			centerY,
 			scale,
@@ -472,12 +585,10 @@ export function renderSplash(
 		);
 	}
 
-	// Wordmark header, centered above the pyramid in the palette's signature color
+	// Wordmark halves enter laterally from opposite sides, then receive a
+	// deterministic horizontal highlight sweep before settling.
 	const headerText = APP_NAME.toUpperCase().split("").join(" ");
-	if (headerText.length <= boxWidth) {
-		const pad = Math.floor((boxWidth - headerText.length) / 2);
-		lines[1] = " ".repeat(pad) + activeStyles.header(headerText);
-	}
+	if (headerText.length <= boxWidth) lines[1] = renderAnimatedWordmark(boxWidth, now, wordmarkStartTime);
 
 	return lines.join("\n");
 }
@@ -490,6 +601,7 @@ type SplashUi = Pick<TUI, "terminal" | "requestRender">;
 
 export class SplashComponent implements Component {
 	private timer: ReturnType<typeof setInterval> | undefined;
+	private readonly wordmarkStartTime = Date.now();
 
 	constructor(
 		private readonly ui: SplashUi,
@@ -523,7 +635,7 @@ export class SplashComponent implements Component {
 	}
 
 	render(width: number): string[] {
-		const art = renderSplash(width, this.ui.terminal.rows, Date.now());
+		const art = renderSplash(width, this.ui.terminal.rows, Date.now(), defaultAnimator, this.wordmarkStartTime);
 		if (art) {
 			const leftMargin = Math.floor((width - Math.min(width, MAX_WIDTH)) / 2);
 			const availableWidth = width - leftMargin;

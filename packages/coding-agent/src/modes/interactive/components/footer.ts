@@ -1,9 +1,11 @@
+import type { ThinkingLevel } from "@void/agent";
 import { type Component, truncateToWidth, visibleWidth } from "@void/tui";
 import { VERSION } from "../../../config.js";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
 import { styleModel, styleProvider } from "../theme/provider-palette.js";
 import { theme } from "../theme/theme.js";
+import { buildReasoningGauge } from "./reasoning-bar.js";
 import { buildStatusLineItems, formatTokens, type StatusLineData, sanitizeStatusText } from "./status-line.js";
 
 /**
@@ -138,8 +140,20 @@ export class FooterComponent implements Component {
 
 		let statsLeft = statsParts.join(" ");
 
-		// Add model name on the right side, plus thinking level if model supports it
+		// Add model name on the right side, plus a compact reasoning gauge when supported.
 		const modelName = state.model?.id || "no-model";
+		const fallbackThinkingLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+		const reasoningGauge = state.model?.reasoning
+			? buildReasoningGauge(
+					{
+						modelSupportsThinking: true,
+						thinkingLevel: state.thinkingLevel || "off",
+						availableLevels: this.session.getAvailableThinkingLevels?.() ?? fallbackThinkingLevels,
+					},
+					width,
+				)
+			: "";
+		const rightSideWithoutProvider = reasoningGauge ? `${modelName} ${reasoningGauge}` : modelName;
 
 		let statsLeftWidth = visibleWidth(statsLeft);
 
@@ -151,14 +165,6 @@ export class FooterComponent implements Component {
 
 		// Calculate available space for padding (minimum 2 spaces between stats and model)
 		const minPadding = 2;
-
-		// Add thinking level indicator if model supports reasoning
-		let rightSideWithoutProvider = modelName;
-		if (state.model?.reasoning) {
-			const thinkingLevel = state.thinkingLevel || "off";
-			rightSideWithoutProvider =
-				thinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${thinkingLevel}`;
-		}
 
 		// Prepend the provider in parentheses if there are multiple providers and there's enough room
 		let rightSide = rightSideWithoutProvider;
@@ -197,15 +203,11 @@ export class FooterComponent implements Component {
 		const dimPadding = theme.fg("dim", padding);
 		let styledRight = theme.fg("dim", displayedRight);
 		if (state.model && displayedRight) {
-			const modelText = showProvider
-				? modelName
-				: displayedRight.slice(0, Math.min(modelName.length, displayedRight.length));
-			const suffix = showProvider
-				? displayedRight.slice(`(${state.model.provider}) ${modelName}`.length)
-				: displayedRight.slice(modelText.length);
-			styledRight = showProvider
-				? `${theme.fg("dim", "(")}${styleProvider(state.model.provider)}${theme.fg("dim", ") ")}${styleModel(state.model.provider, modelName)}${theme.fg("dim", suffix)}`
-				: `${styleModel(state.model.provider, modelName, modelText)}${theme.fg("dim", suffix)}`;
+			const styledGauge = reasoningGauge ? ` ${reasoningGauge}` : "";
+			const styledFullRight = showProvider
+				? `${theme.fg("dim", "(")}${styleProvider(state.model.provider)}${theme.fg("dim", ") ")}${styleModel(state.model.provider, modelName)}${styledGauge}`
+				: `${styleModel(state.model.provider, modelName)}${styledGauge}`;
+			styledRight = truncateToWidth(styledFullRight, visibleWidth(displayedRight), "");
 		}
 
 		const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));

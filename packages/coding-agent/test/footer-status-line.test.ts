@@ -116,6 +116,8 @@ function createSession(options: {
 	statusLineSeparator?: string;
 	modelId?: string;
 	provider?: string;
+	reasoning?: boolean;
+	thinkingLevel?: string;
 }): AgentSession {
 	const mode = options.settingsManager ?? "unset";
 	const session = {
@@ -124,9 +126,9 @@ function createSession(options: {
 				id: options.modelId ?? "test-model",
 				provider: options.provider ?? "test",
 				contextWindow: 200_000,
-				reasoning: false,
+				reasoning: options.reasoning ?? false,
 			},
-			thinkingLevel: "off",
+			thinkingLevel: options.thinkingLevel ?? "off",
 		},
 		sessionManager: {
 			getEntries: () => [],
@@ -174,6 +176,28 @@ describe("FooterComponent statusline integration", () => {
 		const footer = new FooterComponent(session, createFooterData());
 		const lines = footer.render(80);
 		expect(lines.length).toBe(2);
+	});
+
+	it("renders the compact reasoning gauge beside the model without duplicate text", () => {
+		const session = createSession({ settingsManager: "unset", reasoning: true, thinkingLevel: "medium" });
+		const footer = new FooterComponent(session, createFooterData());
+		const line = stripAnsi(footer.render(80)[1]!);
+
+		expect(line).toContain("test-model ████░░");
+		expect(line).not.toContain("thinking");
+	});
+
+	it("keeps the configured status line free of the legacy reasoning gauge", () => {
+		const session = createSession({
+			settingsManager: ["model", "git-branch"],
+			reasoning: true,
+			thinkingLevel: "high",
+		});
+		const footer = new FooterComponent(session, createFooterData());
+		const line = stripAnsi(footer.render(80)[0]!);
+
+		expect(line).toBe("test-model · main");
+		expect(line).not.toContain("█");
 	});
 
 	it("drops the legacy provider when only the model fits", () => {

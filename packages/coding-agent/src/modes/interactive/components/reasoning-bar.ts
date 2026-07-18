@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from "@void/agent";
 import { type Component, truncateToWidth } from "@void/tui";
 import { theme } from "../theme/theme.js";
+import { getActiveSplashBandStyles } from "./splash.js";
 
 const FILLED_BLOCK = "█";
 const EMPTY_BLOCK = "░";
@@ -28,6 +29,20 @@ export function stepThinkingLevel(
 	return availableLevels[next];
 }
 
+function buildReasoningBlocks(data: ReasoningBarData): string {
+	const currentIndex = Math.max(0, data.availableLevels.indexOf(data.thinkingLevel));
+	const splashBands = getActiveSplashBandStyles();
+	return data.availableLevels
+		.map((_level, index) => (index > currentIndex ? theme.fg("dim", EMPTY_BLOCK) : splashBands[index]!(FILLED_BLOCK)))
+		.join("");
+}
+
+/** Build the compact colored reasoning gauge without a duplicate level label. */
+export function buildReasoningGauge(data: ReasoningBarData, width: number): string {
+	if (width <= 0 || !data.modelSupportsThinking || data.availableLevels.length === 0) return "";
+	return truncateToWidth(buildReasoningBlocks(data), width, "");
+}
+
 /** Build the single-line reasoning gauge. Returns "" when there is nothing to show. */
 export function buildReasoningBar(data: ReasoningBarData, width: number): string {
 	if (width <= 0) return "";
@@ -36,14 +51,10 @@ export function buildReasoningBar(data: ReasoningBarData, width: number): string
 		return truncateToWidth(theme.fg("dim", "reasoning unavailable"), width);
 	}
 
-	const currentIndex = Math.max(0, data.availableLevels.indexOf(data.thinkingLevel));
-	const blocks = data.availableLevels
-		.map((level, index) =>
-			index <= currentIndex ? theme.getThinkingBorderColor(level)(FILLED_BLOCK) : theme.fg("dim", EMPTY_BLOCK),
-		)
-		.join("");
+	const blocks = buildReasoningBlocks(data);
 
 	// Plain-width budget: blocks + " " + level name. Drop the label first on narrow terminals.
+	const currentIndex = Math.max(0, data.availableLevels.indexOf(data.thinkingLevel));
 	const label = data.availableLevels[currentIndex] ?? data.thinkingLevel;
 	if (data.availableLevels.length + 1 + label.length > width) {
 		return truncateToWidth(blocks, width, "");
