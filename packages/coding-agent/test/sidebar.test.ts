@@ -1,10 +1,12 @@
-import { setKeybindings } from "@void/tui";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { setKeybindings, visibleWidth } from "@void/tui";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
+	buildSidebarContent,
 	buildSidebarLines,
 	isSidebarVisible,
 	SIDEBAR_MIN_TERMINAL_WIDTH,
+	SIDEBAR_WIDTH,
 	Sidebar,
 	type SidebarData,
 } from "../src/modes/interactive/components/sidebar.js";
@@ -18,6 +20,7 @@ function baseData(overrides: Partial<SidebarData> = {}): SidebarData {
 	return {
 		sessionName: "my-session",
 		version: "1.2.3",
+		modelProvider: "anthropic",
 		modelId: "claude-sonnet",
 		modelSupportsThinking: false,
 		thinkingLevel: "off",
@@ -93,58 +96,84 @@ describe("buildSidebarLines", () => {
 		initTheme(undefined, false);
 	});
 
-	it("shows session name and void version", () => {
+	it("renders the structured sections in order inside a 34-column rail", () => {
 		const lines = buildSidebarLines(baseData()).map(stripAnsi);
-		expect(lines).toContain("my-session");
-		expect(lines).toContain("void v1.2.3");
+		const sectionIndexes = ["SESSION", "MODEL / RUNTIME", "WORKSPACE / GIT", "AGENTS"].map((title) =>
+			lines.findIndex((line) => line.includes(title)),
+		);
+
+		expect(sectionIndexes).toEqual([...sectionIndexes].sort((a, b) => a - b));
+		expect(sectionIndexes.every((index) => index >= 0)).toBe(true);
+		expect(lines[0]).toMatch(/^┌.*┐$/);
+		expect(lines.at(-1)).toMatch(/^└.*┘$/);
+		expect(lines.every((line) => visibleWidth(line) === SIDEBAR_WIDTH)).toBe(true);
+		expect(lines.every((line) => /^[┌├│└].*[┐┤│┘]$/.test(line))).toBe(true);
+	});
+
+	it("shows compact labels and themed values", () => {
+		const lines = buildSidebarLines(baseData()).map(stripAnsi);
+		expect(lines.some((line) => /Name\s+my-session/.test(line))).toBe(true);
+		expect(lines.some((line) => /Version\s+void v1\.2\.3/.test(line))).toBe(true);
+		expect(lines.some((line) => /Provider\s+anthropic/.test(line))).toBe(true);
+		expect(lines.some((line) => /Model\s+claude-sonnet/.test(line))).toBe(true);
+		expect(lines.some((line) => /Context\s+12\.3% \/ 200k/.test(line))).toBe(true);
+		expect(lines.some((line) => /Root\s+void-ts/.test(line))).toBe(true);
+		expect(lines.some((line) => /Branch\s+main/.test(line))).toBe(true);
 	});
 
 	it("falls back to a placeholder when the session has no name", () => {
 		const lines = buildSidebarLines(baseData({ sessionName: undefined })).map(stripAnsi);
-		expect(lines).toContain("(unnamed session)");
+		expect(lines.some((line) => line.includes("(unnamed session)"))).toBe(true);
 	});
 
 	it("shows model id and thinking level only when the model supports thinking", () => {
 		const withThinking = buildSidebarLines(baseData({ modelSupportsThinking: true, thinkingLevel: "high" })).map(
 			stripAnsi,
 		);
-		expect(withThinking).toContain("claude-sonnet");
-		expect(withThinking).toContain("thinking: high");
+		expect(withThinking.some((line) => /Model\s+claude-sonnet/.test(line))).toBe(true);
+		expect(withThinking.some((line) => /Thinking\s+high/.test(line))).toBe(true);
 
 		const withoutThinking = buildSidebarLines(baseData({ modelSupportsThinking: false })).map(stripAnsi);
-		expect(withoutThinking.some((l) => l.startsWith("thinking:"))).toBe(false);
+		expect(withoutThinking.some((line) => line.includes("Thinking"))).toBe(false);
 	});
 
 	it("shows 'no model' when no model is set", () => {
 		const lines = buildSidebarLines(baseData({ modelId: undefined })).map(stripAnsi);
-		expect(lines).toContain("no model");
+		expect(lines.some((line) => /Model\s+no model/.test(line))).toBe(true);
 	});
 
 	it("formats context usage as a percentage, or '?' when unknown", () => {
 		const known = buildSidebarLines(baseData({ contextPercent: 42.5, contextWindow: 200_000 })).map(stripAnsi);
-		expect(known).toContain("context: 42.5%/200k");
+		expect(known.some((line) => /Context\s+42\.5% \/ 200k/.test(line))).toBe(true);
 
 		const unknown = buildSidebarLines(baseData({ contextPercent: null, contextWindow: 200_000 })).map(stripAnsi);
-		expect(unknown).toContain("context: ?/200k");
+		expect(unknown.some((line) => /Context\s+\? \/ 200k/.test(line))).toBe(true);
 	});
 
-	it("shows git branch with a dirty marker and project root basename", () => {
+	it("shows clean and dirty git status with the project root basename", () => {
 		const clean = buildSidebarLines(baseData({ gitBranch: "main", gitDirty: false })).map(stripAnsi);
-		expect(clean.some((l) => l === "main (void-ts)")).toBe(true);
+		expect(clean.some((line) => /Branch\s+main/.test(line))).toBe(true);
+		expect(clean.some((line) => /Status\s+clean/.test(line))).toBe(true);
 
 		const dirty = buildSidebarLines(baseData({ gitBranch: "main", gitDirty: true })).map(stripAnsi);
-		expect(dirty.some((l) => l === "main* (void-ts)")).toBe(true);
+		expect(dirty.some((line) => /Status\s+dirty/.test(line))).toBe(true);
+	});
+
+	it("shows an unknown git status while dirtiness is undetermined", () => {
+		const lines = buildSidebarLines(baseData({ gitBranch: "main", gitDirty: null })).map(stripAnsi);
+		expect(lines.some((line) => /Branch\s+main/.test(line))).toBe(true);
+		expect(lines.some((line) => /Status\s+unknown/.test(line))).toBe(true);
 	});
 
 	it("shows 'no git' when not in a repo", () => {
 		const lines = buildSidebarLines(baseData({ gitBranch: null, gitRoot: null })).map(stripAnsi);
-		expect(lines).toContain("no git");
+		expect(lines.some((line) => /Git\s+no git/.test(line))).toBe(true);
 	});
 
-	it("shows '(none)' in the Agents section when there are no runs", () => {
+	it("shows a placeholder in the Agents section when there are no runs", () => {
 		const lines = buildSidebarLines(baseData({ agentRuns: [] })).map(stripAnsi);
-		expect(lines).toContain("agents 0▶ 0✓");
-		expect(lines).toContain("no runs yet");
+		expect(lines.some((line) => /Runs\s+0▶ 0✓/.test(line))).toBe(true);
+		expect(lines.some((line) => line.includes("no runs yet"))).toBe(true);
 	});
 
 	it("renders one line per agent run with state glyph, name, and elapsed time", () => {
@@ -214,7 +243,7 @@ describe("buildSidebarLines", () => {
 		expect(lines.some((line) => line.includes("⊘") && line.includes("b"))).toBe(true);
 	});
 
-	it("shows only the 8 most recent agent runs, most recent first", () => {
+	it("shows only the 6 most recent agent runs, most recent first", () => {
 		const runs = Array.from({ length: 12 }, (_, i) => ({
 			id: `${i}`,
 			runId: `${i}`,
@@ -233,6 +262,42 @@ describe("buildSidebarLines", () => {
 		expect(runLines[0]).toContain("run-11");
 		expect(runLines[runLines.length - 1]).toContain("run-6");
 	});
+
+	it("keeps overflow and recent-session rows out of focus metadata", () => {
+		const runs = Array.from({ length: 8 }, (_, index) => ({
+			id: `${index}`,
+			runId: `${index}`,
+			name: index === 0 ? "recent-session" : `run-${index}`,
+			provider: "void",
+			harnessId: "void",
+			origin: index === 0 ? ("session" as const) : ("subagent" as const),
+			state: "done" as const,
+			startTime: new Date(2026, 0, 1, 0, 0, index).toISOString(),
+			endTime: new Date(2026, 0, 1, 0, 1, index).toISOString(),
+		}));
+		const content = buildSidebarContent(baseData({ agentRuns: runs }));
+		const lines = content.lines.map(stripAnsi);
+
+		expect(content.agentRowIndexes).toHaveLength(6);
+		expect(content.agentRowIndexes.every((index) => lines[index]?.includes("run-") ?? false)).toBe(true);
+		expect(lines.some((line) => line.includes("…and 2 more"))).toBe(true);
+		expect(lines.some((line) => line.includes("↳ recent-session"))).toBe(true);
+		expect(content.agentRowIndexes).not.toContain(lines.findIndex((line) => line.includes("…and 2 more")));
+		expect(content.agentRowIndexes).not.toContain(lines.findIndex((line) => line.includes("↳ recent-session")));
+	});
+
+	it("truncates long Unicode and ANSI values without breaking the rail", () => {
+		const lines = buildSidebarLines(
+			baseData({
+				sessionName: "会議室-非常に長いセッション名-with-more-text",
+				modelId: "\x1b[31m模型-非常に長いモデル識別子-with-more-text\x1b[39m",
+				gitBranch: "機能/非常に長いブランチ名-with-more-text",
+			}),
+		);
+
+		expect(lines.every((line) => visibleWidth(line) === SIDEBAR_WIDTH)).toBe(true);
+		expect(lines.map(stripAnsi).every((line) => /^[┌├│└].*[┐┤│┘]$/.test(line))).toBe(true);
+	});
 });
 
 describe("Sidebar focus and navigation", () => {
@@ -241,7 +306,16 @@ describe("Sidebar focus and navigation", () => {
 		setKeybindings(new KeybindingsManager());
 	});
 
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("highlights the selected run when the session name contains agents", () => {
+		// Freeze the clock: this test renders twice and compares lines, so a real
+		// clock could tick the elapsed-time label across a second boundary between
+		// renders and change every run row, not just the highlighted one.
+		vi.useFakeTimers();
+		vi.setSystemTime(Date.parse("2026-01-01T00:00:10.000Z"));
 		const { sidebar } = interactiveSidebar();
 		sidebar.focused = false;
 		const unfocused = sidebar.render(34);
@@ -252,6 +326,16 @@ describe("Sidebar focus and navigation", () => {
 
 		expect(reviewerIndex).toBeGreaterThanOrEqual(0);
 		expect(changed).toEqual([reviewerIndex]);
+		expect(stripAnsi(focused[reviewerIndex]!)).toMatch(/^│ .* │$/);
+		expect(focused[reviewerIndex]).toContain("\x1b[48;");
+	});
+
+	it("builds from render(32) so every line retains its rails and stays in bounds", () => {
+		const { sidebar } = interactiveSidebar("会議室-非常に長いセッション名-with-more-text");
+		const lines = sidebar.render(32);
+
+		expect(lines.every((line) => visibleWidth(line) === 32)).toBe(true);
+		expect(lines.map(stripAnsi).every((line) => /^[┌├│└].*[┐┤│┘]$/.test(line))).toBe(true);
 	});
 
 	it("wraps up and down at the run-list bounds", () => {

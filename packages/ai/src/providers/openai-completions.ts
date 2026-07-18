@@ -423,6 +423,24 @@ function buildParams(model: Model<"openai-completions">, context: Context, optio
 		} else {
 			openRouterParams.reasoning = { effort: "none" };
 		}
+	} else if (compat.thinkingFormat === "kimi" && model.reasoning) {
+		// Kimi's coding API uses its native thinking object and prompt cache key.
+		// Do not send OpenAI's legacy reasoning_effort field; Kimi rejects it.
+		const kimiParams = params as typeof params & {
+			thinking?: { type: "enabled" | "disabled" };
+			prompt_cache_key?: string;
+		};
+		if (options?.reasoningEffort) {
+			const effort = mapReasoningEffort(options.reasoningEffort, compat.reasoningEffortMap);
+			if (effort === "off") {
+				kimiParams.thinking = { type: "disabled" };
+			} else if (effort !== "auto") {
+				kimiParams.thinking = { type: "enabled" };
+			}
+		}
+		if (options?.sessionId) {
+			kimiParams.prompt_cache_key = options.sessionId;
+		}
 	} else if (options?.reasoningEffort && model.reasoning && compat.supportsReasoningEffort) {
 		// OpenAI-style reasoning_effort
 		(params as any).reasoning_effort = mapReasoningEffort(options.reasoningEffort, compat.reasoningEffortMap);

@@ -2,6 +2,7 @@ import { type Model, modelsAreEqual } from "@void/ai";
 import { Container, type Focusable, fuzzyFilter, getKeybindings, Input, Spacer, Text, type TUI } from "@void/tui";
 import type { ModelRegistry } from "../../../core/model-registry.js";
 import type { SettingsManager } from "../../../core/settings-manager.js";
+import { styleModel, styleProvider } from "../theme/provider-palette.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { keyHint } from "./keybinding-hints.js";
@@ -235,19 +236,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			const isSelected = i === this.selectedIndex;
 			const isCurrent = modelsAreEqual(this.currentModel, item.model);
 
-			let line = "";
-			if (isSelected) {
-				const prefix = theme.fg("accent", "→ ");
-				const modelText = `${item.id}`;
-				const providerBadge = theme.fg("muted", `[${item.provider}]`);
-				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
-			} else {
-				const modelText = `  ${item.id}`;
-				const providerBadge = theme.fg("muted", `[${item.provider}]`);
-				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${modelText} ${providerBadge}${checkmark}`;
-			}
+			const prefix = isSelected ? theme.fg("accent", "→ ") : "  ";
+			const modelText = styleModel(item.provider, item.id);
+			const providerBadge = styleProvider(item.provider, `[${item.provider}]`);
+			const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
+			const line = `${prefix}${modelText} ${providerBadge}${checkmark}`;
 
 			this.listContainer.addChild(new Text(line, 0, 0));
 		}

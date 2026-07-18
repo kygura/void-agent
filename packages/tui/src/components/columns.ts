@@ -16,10 +16,19 @@ export interface ColumnsOptions {
 }
 
 function padLineToWidth(line: string, width: number): string {
-	const clipped = visibleWidth(line) > width ? truncateToWidth(line, width) : line;
-	const padding = Math.max(0, width - visibleWidth(clipped));
-	return clipped + " ".repeat(padding);
+	const lineWidth = visibleWidth(line);
+	if (lineWidth > width) {
+		return truncateToWidth(line, width, "...", true);
+	}
+	return line + " ".repeat(width - lineWidth);
 }
+
+type RenderCache = {
+	width: number;
+	columnWidths: number[];
+	sourceLines: string[][];
+	lines: string[];
+};
 
 /**
  * Lays out N components side by side. Each column renders at its computed width; every
@@ -29,6 +38,7 @@ function padLineToWidth(line: string, width: number): string {
 export class Columns implements Component {
 	private readonly columns: ColumnSpec[];
 	private readonly gap: number;
+	private cache?: RenderCache;
 
 	constructor(columns: ColumnSpec[], options?: ColumnsOptions) {
 		this.columns = columns;
@@ -36,6 +46,7 @@ export class Columns implements Component {
 	}
 
 	invalidate(): void {
+		this.cache = undefined;
 		for (const col of this.columns) col.component.invalidate?.();
 	}
 
@@ -61,10 +72,29 @@ export class Columns implements Component {
 			return Math.max(0, share);
 		});
 
-		const renderedColumns = this.columns.map((col, i) => {
+		const sourceLines = this.columns.map((col, i) => {
 			const colWidth = widths[i]!;
-			if (colWidth <= 0) return [];
-			return col.component.render(colWidth).map((line) => padLineToWidth(line, colWidth));
+			return colWidth > 0 ? col.component.render(colWidth) : [];
+		});
+		const cache = this.cache;
+		const cacheMatches =
+			cache !== undefined &&
+			cache.width === width &&
+			cache.columnWidths.length === widths.length &&
+			cache.sourceLines.length === sourceLines.length &&
+			cache.columnWidths.every((columnWidth, i) => columnWidth === widths[i]) &&
+			cache.sourceLines.every(
+				(lines, columnIndex) =>
+					lines.length === sourceLines[columnIndex]!.length &&
+					lines.every((line, lineIndex) => line === sourceLines[columnIndex]![lineIndex]),
+			);
+		if (cacheMatches) {
+			return cache.lines;
+		}
+
+		const renderedColumns = sourceLines.map((lines, i) => {
+			const colWidth = widths[i]!;
+			return lines.map((line) => padLineToWidth(line, colWidth));
 		});
 
 		const maxLines = renderedColumns.reduce((max, lines) => Math.max(max, lines.length), 0);
@@ -74,6 +104,12 @@ export class Columns implements Component {
 			const parts = renderedColumns.map((lines, i) => lines[row] ?? " ".repeat(widths[i]!));
 			result.push(parts.join(gapStr));
 		}
+		this.cache = {
+			width,
+			columnWidths: widths,
+			sourceLines: sourceLines.map((lines) => [...lines]),
+			lines: result,
+		};
 		return result;
 	}
 }

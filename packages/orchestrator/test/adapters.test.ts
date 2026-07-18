@@ -29,7 +29,7 @@ import {
 	validateGenericTemplate,
 } from "../src/providers/generic.js";
 import { ConfiguredProvider, createDefaultProviders } from "../src/providers.js";
-import type { Adapter, AuthMode, Event, ProviderConfig } from "../src/types.js";
+import type { Adapter, AuthAdapter, AuthMode, Event, Provider, ProviderConfig, RunConfig } from "../src/types.js";
 
 const fixtureDirectory = new URL("./fixtures/adapters/", import.meta.url);
 
@@ -374,6 +374,39 @@ describe("generic Provider trust boundary", () => {
 });
 
 describe("child authentication", () => {
+	test("derives automatic Claude auth from the binary before starting a run", async () => {
+		let receivedConfig: RunConfig | undefined;
+		let statusCalls = 0;
+		const base: Provider = {
+			name: "claude",
+			type: "claude",
+			async *start(config) {
+				receivedConfig = config;
+				yield { kind: "result", text: "done" };
+			},
+		};
+		const authAdapter: AuthAdapter = {
+			status: async () => {
+				statusCalls++;
+				return { loggedIn: true, authMethod: "claude.ai", subscribed: true };
+			},
+			login: async () => ({ started: false }),
+		};
+		const provider = new ConfiguredProvider(
+			"claude",
+			{ type: "claude", auth: "auto" },
+			base,
+			new AuthCache(),
+			authAdapter,
+		);
+
+		expect(await collect(provider.start({ provider: "claude", prompt: "safe" }))).toEqual([
+			{ kind: "result", text: "done" },
+		]);
+		expect(statusCalls).toBe(1);
+		expect(receivedConfig?.envDenyList?.includes("ANTHROPIC_API_KEY")).toBe(true);
+	});
+
 	test("subscription mode removes inherited API keys from final child environments", () => {
 		const previousAnthropic = process.env.ANTHROPIC_API_KEY;
 		const previousOpenAi = process.env.OPENAI_API_KEY;

@@ -1,4 +1,4 @@
-import type { Component, TUI } from "@void/tui";
+import { type Component, type TUI, truncateToWidth, visibleWidth } from "@void/tui";
 import { APP_NAME } from "../../../config.js";
 import { theme } from "../theme/theme.js";
 
@@ -26,6 +26,13 @@ type Style = (text: string) => string;
 type SplashPalette = {
 	bands: Array<{ hex: string; bold?: boolean }>;
 	spheres: [string, string, string];
+};
+
+type CompiledSplashPalette = {
+	bands: Style[];
+	spheres: Style[];
+	combined: Style[];
+	header: Style;
 };
 
 // Curated splash palettes. Each is a coherent dark -> bright shading ramp:
@@ -99,7 +106,24 @@ function pickSplashPalette(): SplashPalette {
 	return SPLASH_PALETTES[Math.floor(Math.random() * SPLASH_PALETTES.length)] as SplashPalette;
 }
 
+function compileSplashPalette(palette: SplashPalette): CompiledSplashPalette {
+	const bands = palette.bands.map((band) => styleForHex(band.hex, band.bold));
+	const spheres = palette.spheres.map((hex) => styleForHex(hex));
+	return {
+		bands,
+		spheres,
+		combined: [...bands, ...spheres],
+		header: styleForHex(palette.bands[3]!.hex, true),
+	};
+}
+
 let activePalette = pickSplashPalette();
+let activeStyles = compileSplashPalette(activePalette);
+
+function selectSplashPalette(): void {
+	activePalette = pickSplashPalette();
+	activeStyles = compileSplashPalette(activePalette);
+}
 
 // Prism crystal: two pyramids stitched at a shared square base (a bipyramid).
 // Vertex 0 is the top apex, vertex 5 the bottom apex.
@@ -393,8 +417,7 @@ export function renderSplash(
 	const glyphs = Array<string>(boxWidth * boxHeight).fill(" ");
 	const styles = Array<number>(boxWidth * boxHeight).fill(0);
 	const depth = Array<number>(boxWidth * boxHeight).fill(Number.NEGATIVE_INFINITY);
-	const palette = activePalette.bands.map((band) => styleForHex(band.hex, band.bold));
-	const spherePalette = activePalette.spheres.map((hex) => styleForHex(hex));
+	const { bands: palette, combined: combinedPalette } = activeStyles;
 
 	const seconds = now / 1000;
 	for (const sphere of BACKGROUND_SPHERES) {
@@ -445,10 +468,7 @@ export function renderSplash(
 	for (let row = 0; row < boxHeight; row++) {
 		const start = row * boxWidth;
 		lines.push(
-			styleLine(glyphs.slice(start, start + boxWidth), styles.slice(start, start + boxWidth), [
-				...palette,
-				...spherePalette,
-			]),
+			styleLine(glyphs.slice(start, start + boxWidth), styles.slice(start, start + boxWidth), combinedPalette),
 		);
 	}
 
@@ -456,8 +476,7 @@ export function renderSplash(
 	const headerText = APP_NAME.toUpperCase().split("").join(" ");
 	if (headerText.length <= boxWidth) {
 		const pad = Math.floor((boxWidth - headerText.length) / 2);
-		const headerStyle = styleForHex(activePalette.bands[3]!.hex, true);
-		lines[1] = " ".repeat(pad) + headerStyle(headerText);
+		lines[1] = " ".repeat(pad) + activeStyles.header(headerText);
 	}
 
 	return lines.join("\n");
@@ -476,7 +495,7 @@ export class SplashComponent implements Component {
 		private readonly ui: SplashUi,
 		private readonly fallbackWordmark: string = APP_NAME,
 	) {
-		activePalette = pickSplashPalette();
+		selectSplashPalette();
 		this.start();
 	}
 
@@ -505,6 +524,14 @@ export class SplashComponent implements Component {
 
 	render(width: number): string[] {
 		const art = renderSplash(width, this.ui.terminal.rows, Date.now());
-		return art ? art.split("\n") : [renderStaticWordmark(this.fallbackWordmark)];
+		if (art) {
+			const leftMargin = Math.floor((width - Math.min(width, MAX_WIDTH)) / 2);
+			const availableWidth = width - leftMargin;
+			return art.split("\n").map((line) => `${" ".repeat(leftMargin)}${truncateToWidth(line, availableWidth, "")}`);
+		}
+
+		const wordmark = truncateToWidth(renderStaticWordmark(this.fallbackWordmark), Math.max(0, width), "");
+		const leftMargin = Math.max(0, Math.floor((width - visibleWidth(wordmark)) / 2));
+		return [`${" ".repeat(leftMargin)}${wordmark}`];
 	}
 }

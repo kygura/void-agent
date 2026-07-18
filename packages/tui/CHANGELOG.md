@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Improved render-loop performance by narrowing differential line comparisons, reusing unchanged box and column layouts, and preserving cached markdown when text is unchanged.
+
 ## [0.65.2] - 2026-04-06
 
 ### Fixed

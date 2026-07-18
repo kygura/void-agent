@@ -18,6 +18,7 @@ Use `/login` in interactive mode, then select a provider:
 - Claude Pro/Max
 - ChatGPT Plus/Pro (Codex)
 - GitHub Copilot
+- Kimi For Coding
 - Google Gemini CLI
 - Google Antigravity
 
@@ -39,6 +40,12 @@ Use `/logout` to clear credentials. Tokens are stored in `~/.void/auth.json` and
 
 - Requires ChatGPT Plus or Pro subscription
 - Personal use only; for production, use the OpenAI Platform API
+
+### Kimi For Coding
+
+- Select **Kimi For Coding** in `/login` to authenticate with Kimi Code
+- The device flow opens `auth.kimi.com`; enter the displayed code if the browser does not open automatically
+- OAuth models use the Kimi coding endpoint and are separate from API-key models
 
 ## API Keys
 
@@ -68,6 +75,7 @@ void
 | OpenCode Go | `OPENCODE_API_KEY` | `opencode-go` |
 | Hugging Face | `HF_TOKEN` | `huggingface` |
 | Kimi For Coding | `KIMI_API_KEY` | `kimi-coding` |
+| Kimi For Coding OAuth | — | `kimi-coding-oauth` |
 | MiniMax | `MINIMAX_API_KEY` | `minimax` |
 | MiniMax (China) | `MINIMAX_CN_API_KEY` | `minimax-cn` |
 

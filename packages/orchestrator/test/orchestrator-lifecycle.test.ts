@@ -152,9 +152,41 @@ describe("Orchestrator Run lifecycle", () => {
 		await waitForState(orchestrator, cancelledId, "cancelled");
 		await waitForState(orchestrator, otherId, "done");
 
-		expect(orchestrator.runEvents(cancelledId).map((event) => event.kind)).toEqual(["text", "result", "exit"]);
+		const cancelledEvents = orchestrator.runEvents(cancelledId);
+		expect(cancelledEvents.map((event) => event.kind)).toEqual(["text", "result", "exit"]);
+		const cancelledResult = cancelledEvents.find((event) => event.kind === "result");
+		const cancelledExit = cancelledEvents.find((event) => event.kind === "exit");
+		expect(cancelledResult?.isError).toBe(true);
+		expect(cancelledResult?.text).toBe("Run cancelled");
+		expect(cancelledExit?.exitCode).toBe(130);
 		expect(eventKinds(observed, otherId)).toEqual(["text", "text", "result", "exit"]);
 		expect(orchestrator.cancelRun(cancelledId)).toBe(false);
+		await orchestrator.close();
+	});
+
+	test("synthesizes a non-error terminal result when a completed Run's Provider stream ends without its own result/exit", async () => {
+		const orchestrator = new Orchestrator(
+			resolver({
+				silent: new MockProvider({
+					events: [
+						{ kind: "text", text: "hello" },
+						{ kind: "text", text: " world" },
+					],
+				}),
+			}),
+			{ defaultProvider: "silent" },
+		);
+
+		const runId = orchestrator.startRun({ provider: "silent", prompt: "quiet" });
+		await waitForState(orchestrator, runId, "done");
+
+		const events = orchestrator.runEvents(runId);
+		expect(events.map((event) => event.kind)).toEqual(["text", "text", "result", "exit"]);
+		const result = events.find((event) => event.kind === "result");
+		const exit = events.find((event) => event.kind === "exit");
+		expect(result?.isError).toBeUndefined();
+		expect(result?.text).toBe("hello world");
+		expect(exit?.exitCode).toBe(0);
 		await orchestrator.close();
 	});
 

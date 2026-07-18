@@ -60,6 +60,7 @@ import { createCompactionSummaryMessage } from "../../core/messages.js";
 import { findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.js";
 import { isVoidSpawnMessageDetails, VOID_SPAWN_CUSTOM_TYPE } from "../../core/orchestration/messages.js";
 import { getActiveOrchestrationHost, installOrchestrationUiController } from "../../core/orchestration/ui-bridge.js";
+import type { PermissionDecision, PermissionRequest } from "../../core/permissions.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
 import { type SessionContext, SessionManager } from "../../core/session-manager.js";
@@ -92,6 +93,8 @@ import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { OAuthSelectorComponent } from "./components/oauth-selector.js";
+import { PermissionPromptComponent } from "./components/permission-prompt.js";
+import { ReasoningBarComponent, stepThinkingLevel } from "./components/reasoning-bar.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
@@ -484,6 +487,10 @@ export class InteractiveMode {
 	async init(): Promise<void> {
 		if (this.isInitialized) return;
 
+		// The gate instance is shared across session rebuilds and subagent children, so attaching
+		// the approver once here covers every session this process will run.
+		this.attachPermissionApprover();
+
 		// Load changelog (only show new entries, skip for resumed sessions)
 		this.changelogMarkdown = this.getChangelogForDisplay();
 
@@ -491,6 +498,15 @@ export class InteractiveMode {
 		// Both are needed: fd for autocomplete, rg for grep tool and bash commands
 		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
 		this.fdPath = fdPath;
+
+		// Reasoning gauge sits at the very top of the TUI, above the header
+		this.ui.addChild(
+			new ReasoningBarComponent(() => ({
+				modelSupportsThinking: this.session.supportsThinking(),
+				thinkingLevel: this.session.thinkingLevel,
+				availableLevels: this.session.getAvailableThinkingLevels(),
+			})),
+		);
 
 		// Add header container as first child
 		this.ui.addChild(this.headerContainer);
@@ -2080,6 +2096,8 @@ export class InteractiveMode {
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
+		this.defaultEditor.onAction("app.thinking.stepDown", () => this.stepThinkingLevel(-1));
+		this.defaultEditor.onAction("app.thinking.stepUp", () => this.stepThinkingLevel(1));
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
 
@@ -2095,6 +2113,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.permissions.toggle", () => this.togglePermissionGate());
 		this.defaultEditor.onAction("app.sidebar.toggle", () => this.toggleSidebar());
 		this.defaultEditor.onAction("app.sidebar.focus", () => this.focusSidebar());
 		this.defaultEditor.onAction("app.child.enter", () => this.focusLatestLiveSpawnEntry());
@@ -3243,6 +3262,85 @@ export class InteractiveMode {
 			this.updateEditorBorderColor();
 			this.showStatus(`Thinking level: ${newLevel}`);
 		}
+	}
+
+	/** Step the thinking level one position (clamped) via the shared session state path. */
+	private stepThinkingLevel(delta: number): void {
+		if (!this.session.supportsThinking()) {
+			this.showStatus("Current model does not support thinking");
+			return;
+		}
+		const levels = this.session.getAvailableThinkingLevels();
+		const nextLevel = stepThinkingLevel(this.session.thinkingLevel, levels, delta);
+		if (nextLevel === undefined) return;
+
+		this.session.setThinkingLevel(nextLevel);
+		this.footer.invalidate();
+		this.updateEditorBorderColor();
+		this.showStatus(`Thinking level: ${nextLevel}`);
+	}
+
+	/**
+	 * Attach this UI as the permission gate's approver.
+	 *
+	 * Without an approver an enabled gate denies every mutating call, so this must run before
+	 * the first prompt. Sessions created without a gate (the default) are a no-op here.
+	 */
+	private attachPermissionApprover(): void {
+		this.session.permissionGate?.setApprover((request, signal) => this.promptForPermission(request, signal));
+	}
+
+	/**
+	 * Show one approval prompt and resolve with the user's decision.
+	 *
+	 * The gate serializes calls into here, so only one prompt is on screen at a time even when
+	 * an assistant message preflights a batch of parallel tool calls.
+	 */
+	private async promptForPermission(request: PermissionRequest, signal?: AbortSignal): Promise<PermissionDecision> {
+		let prompt: PermissionPromptComponent | undefined;
+		let onAbort: (() => void) | undefined;
+
+		try {
+			const decision = await this.showExtensionCustom<PermissionDecision>((_tui, _theme, _keybindings, done) => {
+				prompt = new PermissionPromptComponent(request, done);
+				if (signal) {
+					// Resolve the prompt on abort so a cancelled turn never leaves a modal on screen
+					// or a pending promise behind it.
+					onAbort = () => prompt?.settle("cancel");
+					if (signal.aborted) {
+						queueMicrotask(onAbort);
+					} else {
+						signal.addEventListener("abort", onAbort, { once: true });
+					}
+				}
+				return prompt;
+			});
+
+			if (decision === "cancel") {
+				void this.session.abort();
+			}
+			return decision;
+		} catch {
+			// Fail closed: if the prompt could not be shown or resolved, deny rather than allow.
+			return "deny";
+		} finally {
+			if (signal && onAbort) {
+				signal.removeEventListener("abort", onAbort);
+			}
+		}
+	}
+
+	/** Toggle approval prompts for mutating tool calls, persisting the new state. */
+	private togglePermissionGate(): void {
+		const gate = this.session.permissionGate;
+		if (!gate) {
+			this.showStatus("Permission prompts are unavailable in this session");
+			return;
+		}
+		const enabled = !gate.isEnabled();
+		gate.setEnabled(enabled);
+		this.settingsManager.setPermissionsEnabled(enabled);
+		this.showStatus(`Permission prompts: ${enabled ? "on" : "off"}`);
 	}
 
 	private async cycleModel(direction: "forward" | "backward"): Promise<void> {

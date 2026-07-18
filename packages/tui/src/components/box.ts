@@ -77,15 +77,12 @@ export class Box implements Component {
 		}
 
 		const contentWidth = Math.max(1, width - this.paddingX * 2);
-		const leftPad = " ".repeat(this.paddingX);
 
-		// Render all children
+		// Render all children. Keep these lines unmodified until after the cache check so
+		// unchanged boxes avoid rebuilding every padded child line on each frame.
 		const childLines: string[] = [];
 		for (const child of this.children) {
-			const lines = child.render(contentWidth);
-			for (const line of lines) {
-				childLines.push(leftPad + line);
-			}
+			childLines.push(...child.render(contentWidth));
 		}
 
 		if (childLines.length === 0) {
@@ -109,8 +106,9 @@ export class Box implements Component {
 		}
 
 		// Content
+		const leftPad = " ".repeat(this.paddingX);
 		for (const line of childLines) {
-			result.push(this.applyBg(line, width));
+			result.push(this.applyBg(leftPad + line, width));
 		}
 
 		// Bottom padding

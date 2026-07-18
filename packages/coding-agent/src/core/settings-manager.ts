@@ -5,6 +5,7 @@ import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir, getProfilesDir } from "../config.js";
 import { mergeConfig } from "./merge-config.js";
+import { resolveMaxConcurrentSubagents } from "./orchestrator-config.js";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -43,6 +44,11 @@ export interface ThinkingBudgetsSettings {
 
 export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
+}
+
+export interface PermissionSettings {
+	enabled?: boolean; // default: false - when true, mutating tool calls prompt for approval before running
+	alwaysAllow?: string[]; // Tool names approved via "always allow"
 }
 
 export type TransportSetting = Transport;
@@ -100,7 +106,8 @@ export interface Settings {
 	statusLine?: string[]; // Ordered list of kebab-case footer item ids (see status-line.ts catalog). Unset = default footer.
 	statusLineSeparator?: string; // default: " · "
 	sidebar?: boolean; // default: true - show the session sidebar pane when terminal width >= 120
-	orchestrator?: OrchestratorConfig; // Child coding-agent CLI Providers; separate from the parent defaultProvider/defaultModel.
+	permissions?: PermissionSettings; // default: disabled - opt-in approval prompts for mutating tools
+	orchestrator?: OrchestratorConfig & { maxConcurrentSubagents?: number }; // Child coding-agent CLI Providers (defaultProvider/providers), plus maxConcurrentSubagents (background subagent-tool concurrency cap; default 6). Separate from the parent defaultProvider/defaultModel.
 }
 
 /** Deep merge settings: overlay takes precedence, nested objects merge recursively */
@@ -578,6 +585,11 @@ export class SettingsManager {
 		return this.settings.orchestrator === undefined ? undefined : structuredClone(this.settings.orchestrator);
 	}
 
+	/** Effective cap on concurrent background subagent-tool runs (default 6; see orchestrator-config.ts). */
+	getMaxConcurrentSubagents(): number {
+		return resolveMaxConcurrentSubagents(this.settings.orchestrator).value;
+	}
+
 	getDefaultModel(): string | undefined {
 		return this.settings.defaultModel;
 	}
@@ -1010,6 +1022,47 @@ export class SettingsManager {
 	setSidebar(enabled: boolean): void {
 		this.globalSettings.sidebar = enabled;
 		this.markModified("sidebar");
+		this.save();
+	}
+
+	/** Opt-in approval prompts for mutating tool calls. Default off: unchanged configs auto-approve. */
+	getPermissionsEnabled(): boolean {
+		return this.settings.permissions?.enabled ?? false;
+	}
+
+	setPermissionsEnabled(enabled: boolean): void {
+		if (!this.globalSettings.permissions) {
+			this.globalSettings.permissions = {};
+		}
+		this.globalSettings.permissions.enabled = enabled;
+		this.markModified("permissions", "enabled");
+		this.save();
+	}
+
+	/** Tool names the user approved with "always allow". */
+	getPermissionsAlwaysAllow(): string[] {
+		return [...(this.settings.permissions?.alwaysAllow ?? [])];
+	}
+
+	addPermissionsAlwaysAllow(toolName: string): void {
+		if (!this.globalSettings.permissions) {
+			this.globalSettings.permissions = {};
+		}
+		const current = this.globalSettings.permissions.alwaysAllow ?? [];
+		if (current.includes(toolName)) {
+			return;
+		}
+		this.globalSettings.permissions.alwaysAllow = [...current, toolName];
+		this.markModified("permissions", "alwaysAllow");
+		this.save();
+	}
+
+	clearPermissionsAlwaysAllow(): void {
+		if (!this.globalSettings.permissions) {
+			this.globalSettings.permissions = {};
+		}
+		this.globalSettings.permissions.alwaysAllow = [];
+		this.markModified("permissions", "alwaysAllow");
 		this.save();
 	}
 }

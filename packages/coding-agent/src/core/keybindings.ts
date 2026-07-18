@@ -16,6 +16,8 @@ export interface AppKeybindings {
 	"app.exit": true;
 	"app.suspend": true;
 	"app.thinking.cycle": true;
+	"app.thinking.stepDown": true;
+	"app.thinking.stepUp": true;
 	"app.model.cycleForward": true;
 	"app.model.cycleBackward": true;
 	"app.model.select": true;
@@ -45,6 +47,7 @@ export interface AppKeybindings {
 	"app.child.detach": true;
 	"app.child.cancel": true;
 	"app.child.queueDrop": true;
+	"app.permissions.toggle": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -62,6 +65,14 @@ export const KEYBINDINGS = {
 	"app.thinking.cycle": {
 		defaultKeys: "shift+tab",
 		description: "Cycle thinking level",
+	},
+	"app.thinking.stepDown": {
+		defaultKeys: ["shift+left", "ctrl+left"],
+		description: "Lower reasoning level",
+	},
+	"app.thinking.stepUp": {
+		defaultKeys: ["shift+right", "ctrl+right"],
+		description: "Raise reasoning level",
 	},
 	"app.model.cycleForward": {
 		defaultKeys: "ctrl+p",
@@ -160,6 +171,10 @@ export const KEYBINDINGS = {
 	"app.child.queueDrop": {
 		defaultKeys: "alt+backspace",
 		description: "Drop the newest child prompt",
+	},
+	"app.permissions.toggle": {
+		defaultKeys: [],
+		description: "Toggle approval prompts for mutating tools",
 	},
 } as const satisfies KeybindingDefinitions;
 

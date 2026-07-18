@@ -5,6 +5,42 @@ export interface OrchestratorSettingsSource {
 	readonly orchestrator?: unknown;
 }
 
+/**
+ * Default concurrency cap for background subagent-tool runs. Arbitrary-but-reasonable: high
+ * enough that typical fan-out (a handful of parallel exploration/review agents) isn't
+ * artificially serialized, low enough to bound worst-case resource/API pressure from a single
+ * turn. A later gate (subagent.ts) reads this via `getMaxConcurrentSubagents`.
+ */
+export const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 6;
+
+export interface MaxConcurrentSubagentsResolution {
+	readonly value: number;
+	readonly diagnostic?: OrchestratorConfigDiagnostic;
+}
+
+/**
+ * Resolve `orchestrator.maxConcurrentSubagents`, defaulting on missing or invalid values.
+ * Reports invalid values as a diagnostic without throwing or rewriting the stored config —
+ * same convention as the rest of this module.
+ */
+export function resolveMaxConcurrentSubagents(orchestratorSettings: unknown): MaxConcurrentSubagentsResolution {
+	if (!isRecord(orchestratorSettings) || orchestratorSettings.maxConcurrentSubagents === undefined) {
+		return { value: DEFAULT_MAX_CONCURRENT_SUBAGENTS };
+	}
+	const raw = orchestratorSettings.maxConcurrentSubagents;
+	if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) {
+		return {
+			value: DEFAULT_MAX_CONCURRENT_SUBAGENTS,
+			diagnostic: {
+				path: "$.orchestrator.maxConcurrentSubagents",
+				code: "invalid-value",
+				message: "maxConcurrentSubagents must be a positive integer",
+			},
+		};
+	}
+	return { value: raw };
+}
+
 export interface OrchestratorConfigDiagnostic {
 	readonly path: string;
 	readonly code: ConfigError["code"];
@@ -28,7 +64,11 @@ export type OrchestratorResolution = OrchestratorResolutionSuccess | Orchestrato
 
 /** Validate child Provider settings and construct the process-lifetime orchestration seam. */
 export function resolveOrchestratorSettings(settings: OrchestratorSettingsSource): OrchestratorResolution {
-	const parsed = parseSettings(settings);
+	// maxConcurrentSubagents lives in the same `orchestrator` key but isn't part of
+	// @void/orchestrator's own config shape (defaultProvider/providers) — strip it before
+	// delegating so parseSettings doesn't reject it as an unknown field. It's resolved
+	// separately via resolveMaxConcurrentSubagents/getMaxConcurrentSubagents.
+	const parsed = parseSettings(withoutMaxConcurrentSubagents(settings));
 	if (!parsed.ok) {
 		return { ok: false, diagnostics: parsed.errors.map(configDiagnostic) };
 	}
@@ -98,4 +138,16 @@ function redactEnvironmentValues(message: string, config: OrchestratorConfig): s
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function withoutMaxConcurrentSubagents(settings: OrchestratorSettingsSource): OrchestratorSettingsSource {
+	if (!isRecord(settings.orchestrator) || !("maxConcurrentSubagents" in settings.orchestrator)) {
+		return settings;
+	}
+	const { maxConcurrentSubagents: _omit, ...rest } = settings.orchestrator;
+	return { orchestrator: rest };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -6,6 +6,7 @@ import { AuthStorage } from "./auth-storage.js";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.js";
 import { ModelRegistry } from "./model-registry.js";
 import { createOrchestrationExtension, type ProcessLifetimeOrchestrationHost } from "./orchestration/index.js";
+import type { PermissionGate } from "./permissions.js";
 import { DefaultResourceLoader, type DefaultResourceLoaderOptions, type ResourceLoader } from "./resource-loader.js";
 import { type CreateAgentSessionResult, createAgentSession } from "./sdk.js";
 import type { SessionManager } from "./session-manager.js";
@@ -61,6 +62,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	tools?: Tool[];
 	customTools?: ToolDefinition[];
+	/** Approval gate for mutating tool calls. Omit to auto-approve (the default). */
+	permissionGate?: PermissionGate;
 }
 
 /**
@@ -216,5 +219,6 @@ export async function createAgentSessionFromServices(
 		tools: options.tools,
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,
+		...(options.permissionGate ? { permissionGate: options.permissionGate } : {}),
 	});
 }

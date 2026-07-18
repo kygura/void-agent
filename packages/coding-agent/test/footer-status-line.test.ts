@@ -1,12 +1,16 @@
+import { visibleWidth } from "@void/tui";
+import stripAnsi from "strip-ansi";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.js";
 import { FooterComponent } from "../src/modes/interactive/components/footer.js";
 import { buildStatusLineItems, type StatusLineData } from "../src/modes/interactive/components/status-line.js";
+import { styleModel, styleProvider } from "../src/modes/interactive/theme/provider-palette.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
 function baseData(overrides: Partial<StatusLineData> = {}): StatusLineData {
 	return {
+		modelProvider: "anthropic",
 		modelId: "claude-sonnet",
 		modelSupportsThinking: false,
 		thinkingLevel: "off",
@@ -25,10 +29,16 @@ function baseData(overrides: Partial<StatusLineData> = {}): StatusLineData {
 	};
 }
 
+beforeAll(() => {
+	initTheme(undefined, false);
+});
+
 describe("buildStatusLineItems", () => {
 	it("renders known catalog items", () => {
 		const data = baseData({ modelSupportsThinking: true, thinkingLevel: "high" });
-		expect(buildStatusLineItems(data, ["model", "thinking-level"])).toEqual(["claude-sonnet", "high"]);
+		const items = buildStatusLineItems(data, ["model", "thinking-level"]);
+		expect(items).toEqual([styleModel("anthropic", "claude-sonnet"), "high"]);
+		expect(stripAnsi(items[0]!)).toBe("claude-sonnet");
 	});
 
 	it("drops empty items instead of emitting blank entries", () => {
@@ -92,7 +102,11 @@ describe("buildStatusLineItems", () => {
 	});
 
 	it("renders unknown ids as literal text, for custom labels/separators", () => {
-		expect(buildStatusLineItems(baseData(), ["void:", "model", "|"])).toEqual(["void:", "claude-sonnet", "|"]);
+		expect(buildStatusLineItems(baseData(), ["void:", "model", "|"])).toEqual([
+			"void:",
+			styleModel("anthropic", "claude-sonnet"),
+			"|",
+		]);
 	});
 });
 
@@ -101,13 +115,14 @@ function createSession(options: {
 	settingsManager?: "absent" | "unset" | string[];
 	statusLineSeparator?: string;
 	modelId?: string;
+	provider?: string;
 }): AgentSession {
 	const mode = options.settingsManager ?? "unset";
 	const session = {
 		state: {
 			model: {
 				id: options.modelId ?? "test-model",
-				provider: "test",
+				provider: options.provider ?? "test",
 				contextWindow: 200_000,
 				reasoning: false,
 			},
@@ -134,22 +149,18 @@ function createSession(options: {
 	return session as unknown as AgentSession;
 }
 
-function createFooterData(): ReadonlyFooterDataProvider {
+function createFooterData(providerCount = 1): ReadonlyFooterDataProvider {
 	return {
 		getGitBranch: () => "main",
 		getGitRoot: () => "/tmp/project",
 		getGitDirty: () => false,
 		getExtensionStatuses: () => new Map<string, string>(),
-		getAvailableProviderCount: () => 1,
+		getAvailableProviderCount: () => providerCount,
 		onBranchChange: () => () => {},
 	};
 }
 
 describe("FooterComponent statusline integration", () => {
-	beforeAll(() => {
-		initTheme(undefined, false);
-	});
-
 	it("renders the legacy multi-line footer when statusLine is unset (default behavior)", () => {
 		const session = createSession({ settingsManager: "unset" });
 		const footer = new FooterComponent(session, createFooterData());
@@ -165,13 +176,72 @@ describe("FooterComponent statusline integration", () => {
 		expect(lines.length).toBe(2);
 	});
 
+	it("drops the legacy provider when only the model fits", () => {
+		const footer = new FooterComponent(createSession({ settingsManager: "unset" }), createFooterData(2));
+		const width = 29;
+		const lines = footer.render(width);
+
+		expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+		expect(stripAnsi(lines[1]!)).toBe("12.3%/200k (auto)  test-model");
+	});
+
+	it("truncates the legacy model to the available right-side width", () => {
+		const footer = new FooterComponent(createSession({ settingsManager: "unset" }), createFooterData());
+		const width = 23;
+		const lines = footer.render(width);
+
+		expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+		expect(stripAnsi(lines[1]!)).toBe("12.3%/200k (auto)  test");
+	});
+
+	it("omits the legacy model when no right-side width is available", () => {
+		const footer = new FooterComponent(createSession({ settingsManager: "unset" }), createFooterData());
+		const width = 19;
+		const lines = footer.render(width);
+
+		expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+		expect(stripAnsi(lines[1]!)).toBe("12.3%/200k (auto)");
+	});
+
+	it("colors the legacy footer provider and frontier model with their palette", () => {
+		const session = createSession({
+			settingsManager: "unset",
+			provider: "anthropic",
+			modelId: "claude-fable",
+		});
+		const footer = new FooterComponent(session, createFooterData(2));
+		const lines = footer.render(80);
+
+		expect(lines[1]).toContain(styleProvider("anthropic"));
+		expect(lines[1]).toContain(styleModel("anthropic", "claude-fable"));
+	});
+
 	it("renders a single themed line when statusLine is configured", () => {
-		const session = createSession({ settingsManager: ["model", "git-branch"], modelId: "claude-sonnet" });
+		const session = createSession({
+			settingsManager: ["model", "git-branch"],
+			provider: "anthropic",
+			modelId: "claude-sonnet",
+		});
 		const footer = new FooterComponent(session, createFooterData());
 		const lines = footer.render(80);
 		expect(lines.length).toBe(1);
-		expect(lines[0]).toContain("claude-sonnet");
+		expect(lines[0]).toContain(styleModel("anthropic", "claude-sonnet"));
 		expect(lines[0]).toContain("main");
+	});
+
+	it("keeps a narrow configured status line within terminal width", () => {
+		const footer = new FooterComponent(
+			createSession({
+				settingsManager: ["model", "git-branch"],
+				provider: "anthropic",
+				modelId: "claude-sonnet",
+			}),
+			createFooterData(),
+		);
+		const width = 10;
+		const [line] = footer.render(width);
+
+		expect(visibleWidth(line!)).toBeLessThanOrEqual(width);
 	});
 
 	it("uses the configured separator between items", () => {

@@ -30,6 +30,7 @@ import type { ModelRegistry } from "./core/model-registry.js";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.js";
 import { ProcessLifetimeOrchestrationHost } from "./core/orchestration/index.js";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.js";
+import { PermissionGate } from "./core/permissions.js";
 import type { CreateAgentSessionOptions } from "./core/sdk.js";
 import {
 	formatMissingSessionCwdPrompt,
@@ -523,6 +524,15 @@ export async function main(args: string[]) {
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
 	const authStorage = AuthStorage.create();
 	const orchestrationHost = new ProcessLifetimeOrchestrationHost();
+	/**
+	 * Approval gate for mutating tool calls, shared across session rebuilds (cwd switches) and
+	 * with in-process subagent children so their requests reach this process's prompt queue.
+	 *
+	 * Interactive mode only: it is the only mode with a human to answer the prompt. Print and RPC
+	 * mode keep today's auto-approve behavior. Created only when the setting is on, so an
+	 * untouched config allocates nothing and behaves exactly as before.
+	 */
+	let permissionGate: PermissionGate | undefined;
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 		cwd,
 		agentDir,
@@ -587,6 +597,15 @@ export async function main(args: string[]) {
 			}
 		}
 
+		if (appMode === "interactive" && !permissionGate && services.settingsManager.getPermissionsEnabled()) {
+			const permissionSettings = services.settingsManager;
+			permissionGate = new PermissionGate({
+				enabled: true,
+				alwaysAllow: permissionSettings.getPermissionsAlwaysAllow(),
+				onAlwaysAllow: (toolName) => permissionSettings.addPermissionsAlwaysAllow(toolName),
+			});
+		}
+
 		const created = await createAgentSessionFromServices({
 			services,
 			sessionManager,
@@ -596,6 +615,7 @@ export async function main(args: string[]) {
 			scopedModels: sessionOptions.scopedModels,
 			tools: sessionOptions.tools,
 			customTools: sessionOptions.customTools,
+			...(permissionGate ? { permissionGate } : {}),
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
@@ -648,6 +668,9 @@ export async function main(args: string[]) {
 		stdinContent = await readPipedStdin();
 		if (stdinContent !== undefined && appMode === "interactive") {
 			appMode = "print";
+			// Piped stdin demotes this run to print mode, which has no prompt UI. Disable the gate
+			// rather than leave it enabled with no approver, which would deny every mutating call.
+			permissionGate?.setEnabled(false);
 		}
 	}
 	time("readPipedStdin");

@@ -2,6 +2,7 @@ import { type Component, truncateToWidth, visibleWidth } from "@void/tui";
 import { VERSION } from "../../../config.js";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
+import { styleModel, styleProvider } from "../theme/provider-palette.js";
 import { theme } from "../theme/theme.js";
 import { buildStatusLineItems, formatTokens, type StatusLineData, sanitizeStatusText } from "./status-line.js";
 
@@ -161,45 +162,54 @@ export class FooterComponent implements Component {
 
 		// Prepend the provider in parentheses if there are multiple providers and there's enough room
 		let rightSide = rightSideWithoutProvider;
+		let showProvider = false;
 		if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
-			rightSide = `(${state.model!.provider}) ${rightSideWithoutProvider}`;
+			rightSide = `(${state.model.provider}) ${rightSideWithoutProvider}`;
 			if (statsLeftWidth + minPadding + visibleWidth(rightSide) > width) {
 				// Too wide, fall back
 				rightSide = rightSideWithoutProvider;
+			} else {
+				showProvider = true;
 			}
 		}
 
 		const rightSideWidth = visibleWidth(rightSide);
 		const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
 
-		let statsLine: string;
+		let padding = "";
+		let displayedRight = "";
 		if (totalNeeded <= width) {
 			// Both fit - add padding to right-align model
-			const padding = " ".repeat(width - statsLeftWidth - rightSideWidth);
-			statsLine = statsLeft + padding + rightSide;
+			padding = " ".repeat(width - statsLeftWidth - rightSideWidth);
+			displayedRight = rightSide;
 		} else {
 			// Need to truncate right side
 			const availableForRight = width - statsLeftWidth - minPadding;
 			if (availableForRight > 0) {
-				const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
-				const truncatedRightWidth = visibleWidth(truncatedRight);
-				const padding = " ".repeat(Math.max(0, width - statsLeftWidth - truncatedRightWidth));
-				statsLine = statsLeft + padding + truncatedRight;
-			} else {
-				// Not enough space for right side at all
-				statsLine = statsLeft;
+				displayedRight = truncateToWidth(rightSide, availableForRight, "");
+				padding = " ".repeat(Math.max(0, width - statsLeftWidth - visibleWidth(displayedRight)));
 			}
 		}
 
-		// Apply dim to each part separately. statsLeft may contain color codes (for context %)
-		// that end with a reset, which would clear an outer dim wrapper. So we dim the parts
-		// before and after the colored section independently.
+		// Apply dim to each part separately. statsLeft may contain color codes (for context %),
+		// while provider/model colors end with resets that would clear an outer dim wrapper.
 		const dimStatsLeft = theme.fg("dim", statsLeft);
-		const remainder = statsLine.slice(statsLeft.length); // padding + rightSide
-		const dimRemainder = theme.fg("dim", remainder);
+		const dimPadding = theme.fg("dim", padding);
+		let styledRight = theme.fg("dim", displayedRight);
+		if (state.model && displayedRight) {
+			const modelText = showProvider
+				? modelName
+				: displayedRight.slice(0, Math.min(modelName.length, displayedRight.length));
+			const suffix = showProvider
+				? displayedRight.slice(`(${state.model.provider}) ${modelName}`.length)
+				: displayedRight.slice(modelText.length);
+			styledRight = showProvider
+				? `${theme.fg("dim", "(")}${styleProvider(state.model.provider)}${theme.fg("dim", ") ")}${styleModel(state.model.provider, modelName)}${theme.fg("dim", suffix)}`
+				: `${styleModel(state.model.provider, modelName, modelText)}${theme.fg("dim", suffix)}`;
+		}
 
 		const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
-		const lines = [pwdLine, dimStatsLeft + dimRemainder];
+		const lines = [pwdLine, dimStatsLeft + dimPadding + styledRight];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();
@@ -232,6 +242,7 @@ export class FooterComponent implements Component {
 	): string[] {
 		const state = this.session.state;
 		const data: StatusLineData = {
+			modelProvider: state.model?.provider,
 			modelId: state.model?.id,
 			modelSupportsThinking: !!state.model?.reasoning,
 			thinkingLevel: state.thinkingLevel || "off",

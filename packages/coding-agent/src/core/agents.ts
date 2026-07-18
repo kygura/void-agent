@@ -21,6 +21,8 @@ export interface AgentDefinition {
 	model?: string;
 	/** Harness id: "void" (default, in-process) | "claude" | "codex" | a registered generic harness id. */
 	harness: string;
+	/** Opt-in per-child git worktree isolation (see SPEC-void-orchestration-gaps.md, Part 4). Undefined = off. */
+	isolation?: "worktree";
 	/** Markdown body, used verbatim as the child's system prompt. */
 	systemPrompt: string;
 	/** Source file this definition was loaded from. */
@@ -33,6 +35,7 @@ interface AgentFrontmatter {
 	tools?: string | string[];
 	model?: string;
 	harness?: string;
+	isolation?: string;
 	[key: string]: unknown;
 }
 
@@ -70,6 +73,7 @@ function loadAgentsFromDir(dir: string): AgentDefinition[] {
 				tools: parseToolsField(frontmatter.tools),
 				model: frontmatter.model,
 				harness: frontmatter.harness || "void",
+				isolation: frontmatter.isolation === "worktree" ? "worktree" : undefined,
 				systemPrompt: body.trim(),
 				filePath,
 			});

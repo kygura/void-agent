@@ -1,4 +1,5 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@void/ai";
@@ -9,8 +10,21 @@ import type { Harness, HarnessEvent, HarnessRunConfig } from "../src/core/harnes
 import { nowIso } from "../src/core/harness/types.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
 import { createAgentSession } from "../src/core/sdk.js";
+import { SettingsManager } from "../src/core/settings-manager.js";
 import { codingTools, readOnlyTools } from "../src/core/tools/index.js";
-import { resolveAgentTools } from "../src/core/tools/subagent.js";
+import { createSubagentToolDefinition, resolveAgentTools, SubagentRegistry } from "../src/core/tools/subagent.js";
+import { worktreePath } from "../src/core/worktree.js";
+
+/** Initializes a real git repo at `dir` with one commit, for the worktree-isolation tests. */
+function initGitRepo(dir: string): void {
+	const git = (args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf-8" });
+	git(["init", "--initial-branch=main"]);
+	git(["config", "--local", "user.email", "test@test.com"]);
+	git(["config", "--local", "user.name", "Test"]);
+	writeFileSync(join(dir, "README.md"), "hello\n");
+	git(["add", "README.md"]);
+	git(["commit", "-m", "initial commit"]);
+}
 
 function writeAgentFile(dir: string, fileName: string, content: string): void {
 	mkdirSync(dir, { recursive: true });
@@ -142,9 +156,14 @@ describe("subagent tool", () => {
 			expect(tools.map((t) => t.name)).toEqual(["read", "grep"]);
 		});
 
+		it("resolves WebSearch/web_search case-insensitively to the web_search tool", () => {
+			const tools = resolveAgentTools(cwd, ["WebSearch", "web_search"]);
+			expect(tools.map((t) => t.name)).toEqual(["web_search", "web_search"]);
+		});
+
 		it("drops unknown tool names and warns instead of throwing", () => {
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-			const tools = resolveAgentTools(cwd, ["read", "WebFetch", "WebSearch", "Task"]);
+			const tools = resolveAgentTools(cwd, ["read", "WebFetch", "NotARealTool", "Task"]);
 			expect(tools.map((t) => t.name)).toEqual(["read"]);
 			expect(errorSpy).toHaveBeenCalledTimes(3);
 			errorSpy.mockRestore();
@@ -152,7 +171,7 @@ describe("subagent tool", () => {
 
 		it("falls back to read-only tools when nothing resolves", () => {
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-			const tools = resolveAgentTools(cwd, ["WebFetch", "WebSearch"]);
+			const tools = resolveAgentTools(cwd, ["WebFetch", "NotARealTool"]);
 			expect(tools.map((t) => t.name).sort()).toEqual(readOnlyTools.map((t) => t.name).sort());
 			errorSpy.mockRestore();
 		});
@@ -348,6 +367,254 @@ describe("subagent tool", () => {
 				{ timeout: 2000, interval: 20 },
 			);
 			expect(session.getLastAssistantText()).toBe("Acknowledged: mock worker done.");
+		});
+	});
+
+	describe("background concurrency cap", () => {
+		/**
+		 * Controllable external mock harness: yields "started" immediately (recording start order,
+		 * the FIFO proof this describe block needs), then blocks per-prompt until release(prompt) is
+		 * called, then yields its result/exit. Distinct prompts get independent gates so tests can
+		 * release runs in any order to prove the queue drains FIFO, not just "eventually all start".
+		 */
+		class MultiGatedMockHarness implements Harness {
+			readonly id = "mock";
+			readonly resumable = false;
+			readonly startedOrder: string[] = [];
+			private readonly gates = new Map<string, { promise: Promise<void>; release: () => void }>();
+
+			private gateFor(prompt: string) {
+				let gate = this.gates.get(prompt);
+				if (!gate) {
+					let release!: () => void;
+					const promise = new Promise<void>((r) => {
+						release = r;
+					});
+					gate = { promise, release };
+					this.gates.set(prompt, gate);
+				}
+				return gate;
+			}
+
+			async *start(cfg: HarnessRunConfig): AsyncGenerator<HarnessEvent> {
+				this.startedOrder.push(cfg.prompt);
+				yield { kind: "started", timestamp: nowIso(), providerSessionId: `sess-${cfg.prompt}` };
+				await this.gateFor(cfg.prompt).promise;
+				yield { kind: "result", timestamp: nowIso(), text: `done: ${cfg.prompt}` };
+				yield { kind: "exit", timestamp: nowIso(), exitCode: 0 };
+			}
+
+			release(prompt: string): void {
+				this.gateFor(prompt).release();
+			}
+		}
+
+		// No body text (so no systemPrompt): keeps the harness-observed prompt identical to the one
+		// passed in, which is what this describe block's start-order assertions key off of.
+		function writeMockWorkerAgent(): void {
+			writeAgentFile(
+				join(cwd, ".void", "agents"),
+				"mock-worker.md",
+				["---", "name: mock-worker", "description: Uses the mock harness.", "harness: mock", "---"].join("\n"),
+			);
+		}
+
+		function textOf(result: { content: Array<{ type: string; text?: string }> }): string {
+			return result.content
+				.filter((c) => c.type === "text")
+				.map((c) => c.text ?? "")
+				.join("\n");
+		}
+
+		function buildTool(harness: MultiGatedMockHarness, maxConcurrentSubagents: number) {
+			const manager = new HarnessRunManager(join(agentDir, "harness-sessions"));
+			manager.registerHarness(harness);
+			const settingsManager = SettingsManager.inMemory({
+				orchestrator: { defaultProvider: "mock", providers: { mock: { type: "mock" } }, maxConcurrentSubagents },
+			});
+			const tool = createSubagentToolDefinition({
+				cwd,
+				agentDir,
+				harnessRunManager: manager,
+				registry: new SubagentRegistry(),
+				parentSessionRef: {},
+				settingsManager,
+			});
+			const call = (prompt: string) =>
+				tool.execute(
+					"tc",
+					{ agent: "mock-worker", prompt, run_in_background: true },
+					undefined,
+					undefined,
+					{} as never,
+				);
+			return { call };
+		}
+
+		it("holds background calls past the cap in a FIFO queue and starts them as slots free", async () => {
+			writeMockWorkerAgent();
+			const harness = new MultiGatedMockHarness();
+			const { call } = buildTool(harness, 2);
+
+			const r0 = await call("task-0");
+			const r1 = await call("task-1");
+			const r2 = await call("task-2"); // 3rd call, cap is 2 -> must queue
+
+			expect(textOf(r0)).not.toMatch(/may be queued/);
+			expect(textOf(r1)).not.toMatch(/may be queued/);
+			expect(textOf(r2)).toMatch(/may be queued/);
+
+			// Only the first two have actually started; the third is parked, not yet running.
+			await vi.waitFor(() => expect(harness.startedOrder).toEqual(["task-0", "task-1"]));
+
+			// Free task-0's slot: task-2 (the only queued call, FIFO) should now start.
+			harness.release("task-0");
+			await vi.waitFor(() => expect(harness.startedOrder).toEqual(["task-0", "task-1", "task-2"]));
+
+			// Let the rest finish so nothing dangles past the test.
+			harness.release("task-1");
+			harness.release("task-2");
+		});
+
+		it("drains multiple queued calls in FIFO order as slots free one at a time", async () => {
+			writeMockWorkerAgent();
+			const harness = new MultiGatedMockHarness();
+			const { call } = buildTool(harness, 1);
+
+			const r0 = await call("a");
+			const r1 = await call("b"); // queued behind "a"
+			const r2 = await call("c"); // queued behind "b"
+
+			expect(textOf(r0)).not.toMatch(/may be queued/);
+			expect(textOf(r1)).toMatch(/may be queued/);
+			expect(textOf(r2)).toMatch(/may be queued/);
+
+			await vi.waitFor(() => expect(harness.startedOrder).toEqual(["a"]));
+
+			harness.release("a");
+			await vi.waitFor(() => expect(harness.startedOrder).toEqual(["a", "b"]));
+
+			harness.release("b");
+			await vi.waitFor(() => expect(harness.startedOrder).toEqual(["a", "b", "c"]));
+
+			harness.release("c");
+		});
+
+		it("reads the cap from settings rather than a hardcoded number", async () => {
+			writeMockWorkerAgent();
+
+			// cap = 1: the 2nd call is already queued.
+			const harnessCap1 = new MultiGatedMockHarness();
+			const { call: callCap1 } = buildTool(harnessCap1, 1);
+			const r0 = await callCap1("only-0");
+			const r1 = await callCap1("only-1");
+			expect(textOf(r0)).not.toMatch(/may be queued/);
+			expect(textOf(r1)).toMatch(/may be queued/);
+			harnessCap1.release("only-0");
+			harnessCap1.release("only-1");
+
+			// cap = 2: the same 2nd call is NOT queued - behavior changes with the configured value.
+			const harnessCap2 = new MultiGatedMockHarness();
+			const { call: callCap2 } = buildTool(harnessCap2, 2);
+			const s0 = await callCap2("only-0");
+			const s1 = await callCap2("only-1");
+			expect(textOf(s0)).not.toMatch(/may be queued/);
+			expect(textOf(s1)).not.toMatch(/may be queued/);
+			harnessCap2.release("only-0");
+			harnessCap2.release("only-1");
+		});
+	});
+
+	describe("worktree isolation (SPEC Part 4)", () => {
+		it("does not create a worktree unless isolation is requested", async () => {
+			initGitRepo(cwd);
+			const { session, faux } = await setupFauxSession({ cwd, agentDir });
+
+			faux.setResponses([
+				fauxAssistantMessage([fauxToolCall("subagent", { prompt: "say hi" })]),
+				fauxAssistantMessage("Hello from child"),
+				fauxAssistantMessage("Child said hi"),
+			]);
+
+			await session.prompt("spawn a subagent to say hi");
+
+			expect(existsSync(join(agentDir, "worktrees"))).toBe(false);
+		});
+
+		it("creates a worktree via the tool param, uses it as the child's cwd, and removes it when clean", async () => {
+			initGitRepo(cwd);
+			const { session, faux } = await setupFauxSession({ cwd, agentDir });
+
+			faux.setResponses([
+				fauxAssistantMessage([fauxToolCall("subagent", { prompt: "say hi", isolation: "worktree" })]),
+				fauxAssistantMessage("Hello from an isolated child"),
+				fauxAssistantMessage("Child replied"),
+			]);
+
+			await session.prompt("spawn an isolated subagent");
+
+			const resultText = getToolResultText(session, "subagent");
+			const id = /\[subagent (\S+) \|/.exec(resultText)?.[1];
+			expect(id).toBeTruthy();
+			// Clean (no file changes) - the worktree is auto-removed, not left dangling.
+			expect(resultText).not.toMatch(/worktree isolation/);
+			expect(existsSync(worktreePath(agentDir, id as string))).toBe(false);
+		});
+
+		it("preserves a dirty worktree and surfaces its path in the result text, without touching the parent's cwd", async () => {
+			initGitRepo(cwd);
+			const { session, faux } = await setupFauxSession({ cwd, agentDir });
+
+			faux.setResponses([
+				fauxAssistantMessage([fauxToolCall("subagent", { prompt: "write a file", isolation: "worktree" })]),
+				fauxAssistantMessage([fauxToolCall("write", { path: "marker.txt", content: "from isolated child" })]),
+				fauxAssistantMessage("Wrote marker.txt"),
+				fauxAssistantMessage("Child wrote the file"),
+			]);
+
+			await session.prompt("spawn an isolated subagent to write a file");
+
+			const resultText = getToolResultText(session, "subagent");
+			const id = /\[subagent (\S+) \|/.exec(resultText)?.[1];
+			expect(id).toBeTruthy();
+			const wtPath = worktreePath(agentDir, id as string);
+
+			expect(resultText).toContain("[worktree isolation] left uncommitted changes in place");
+			expect(resultText).toContain(wtPath);
+			expect(readFileSync(join(wtPath, "marker.txt"), "utf-8")).toBe("from isolated child");
+			// Isolation actually happened: the file landed in the worktree, not the parent's own cwd.
+			expect(existsSync(join(cwd, "marker.txt"))).toBe(false);
+		});
+
+		it("opts in via agent-definition frontmatter as an alternative to the tool param", async () => {
+			initGitRepo(cwd);
+			writeAgentFile(
+				join(cwd, ".void", "agents"),
+				"isolated-worker.md",
+				[
+					"---",
+					"name: isolated-worker",
+					"description: Runs in its own git worktree.",
+					"isolation: worktree",
+					"---",
+					"Isolated worker body.",
+				].join("\n"),
+			);
+			const { session, faux } = await setupFauxSession({ cwd, agentDir });
+
+			faux.setResponses([
+				fauxAssistantMessage([fauxToolCall("subagent", { agent: "isolated-worker", prompt: "say hi" })]),
+				fauxAssistantMessage("Hello from the isolated worker"),
+				fauxAssistantMessage("Worker replied"),
+			]);
+
+			await session.prompt("spawn the isolated worker");
+
+			const resultText = getToolResultText(session, "subagent");
+			const id = /\[subagent (\S+) \|/.exec(resultText)?.[1];
+			expect(id).toBeTruthy();
+			// Clean run - proves the frontmatter opt-in also creates (and cleans up) a worktree.
+			expect(existsSync(worktreePath(agentDir, id as string))).toBe(false);
 		});
 	});
 });

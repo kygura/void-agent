@@ -1,5 +1,5 @@
 import type { Terminal } from "@void/tui";
-import { visibleWidth } from "@void/tui";
+import { truncateToWidth, visibleWidth } from "@void/tui";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import {
 	FRAME_INTERVAL_MS,
@@ -9,6 +9,7 @@ import {
 	MIN_HEIGHT,
 	MIN_WIDTH,
 	renderSplash,
+	renderStaticWordmark,
 	resetSplashAnimation,
 	SplashAnimator,
 	SplashComponent,
@@ -80,12 +81,83 @@ describe("startup splash", () => {
 	});
 
 	test("uses the static wordmark below the minimum terminal height", () => {
+		// Fake timers so the component's frame interval never becomes a real
+		// leaked handle if an assertion fails before stop().
+		vi.useFakeTimers();
 		const requestRender = vi.fn();
 		const terminal = { rows: MIN_HEIGHT - 1 } as unknown as Terminal;
 		const splash = new SplashComponent({ terminal, requestRender });
 		expect(stripAnsi(splash.render(80).join("\n"))).toContain("void");
 		splash.stop();
 		expect(splash.isRunning).toBe(false);
+	});
+
+	test("centers capped art with one shared margin", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(FIXED_TIME);
+		const requestRender = vi.fn();
+		const terminal = { rows: 20 } as unknown as Terminal;
+		const splash = new SplashComponent({ terminal, requestRender });
+		const lines = splash.render(80);
+		const artLines = renderSplash(80, terminal.rows, FIXED_TIME).split("\n");
+
+		expect(lines).toEqual(artLines.map((line) => `          ${line}`));
+		splash.stop();
+	});
+
+	test("keeps the odd extra column on the right", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(FIXED_TIME);
+		const requestRender = vi.fn();
+		const terminal = { rows: 20 } as unknown as Terminal;
+		const splash = new SplashComponent({ terminal, requestRender });
+		const lines = splash.render(81).map(stripAnsi);
+		const artLines = stripAnsi(renderSplash(81, terminal.rows, FIXED_TIME)).split("\n");
+
+		expect(lines.every((line) => line.startsWith(" ".repeat(10)))).toBe(true);
+		expect(lines).toEqual(artLines.map((line) => `          ${line}`));
+		splash.stop();
+	});
+
+	test("centers the static fallback wordmark", () => {
+		vi.useFakeTimers();
+		const requestRender = vi.fn();
+		const terminal = { rows: MIN_HEIGHT - 1 } as unknown as Terminal;
+		const splash = new SplashComponent({ terminal, requestRender }, "void");
+		const line = splash.render(10)[0]!;
+
+		expect(stripAnsi(line)).toBe("   void");
+		expect(visibleWidth(line)).toBe(7);
+		splash.stop();
+	});
+
+	test("truncates a narrow static fallback wordmark", () => {
+		vi.useFakeTimers();
+		const requestRender = vi.fn();
+		const terminal = { rows: MIN_HEIGHT - 1 } as unknown as Terminal;
+		const splash = new SplashComponent({ terminal, requestRender }, "void");
+		const line = splash.render(3)[0]!;
+
+		expect(stripAnsi(line)).toBe(stripAnsi(truncateToWidth(renderStaticWordmark("void"), 3, "")));
+		expect(visibleWidth(line)).toBeLessThanOrEqual(3);
+		splash.stop();
+	});
+
+	test("keeps every returned line within the requested width", () => {
+		vi.useFakeTimers();
+		const requestRender = vi.fn();
+		for (const [width, rows] of [
+			[0, MIN_HEIGHT - 1],
+			[3, MIN_HEIGHT - 1],
+			[MIN_WIDTH - 1, MIN_HEIGHT],
+			[MIN_WIDTH, MIN_HEIGHT],
+			[80, 20],
+		] as const) {
+			const terminal = { rows } as unknown as Terminal;
+			const splash = new SplashComponent({ terminal, requestRender }, "a longer fallback wordmark");
+			expect(splash.render(width).every((line) => visibleWidth(line) <= width)).toBe(true);
+			splash.stop();
+		}
 	});
 
 	test("stops requesting frames after transcript content appears", () => {

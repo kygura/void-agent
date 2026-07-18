@@ -15,7 +15,15 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import type { Agent, AgentEvent, AgentMessage, AgentState, AgentTool, ThinkingLevel } from "@void/agent";
+import type {
+	Agent,
+	AgentEvent,
+	AgentMessage,
+	AgentState,
+	AgentTool,
+	BeforeToolCallResult,
+	ThinkingLevel,
+} from "@void/agent";
 import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@void/ai";
 import { isContextOverflow, modelsAreEqual, resetApiProviders, supportsXhigh } from "@void/ai";
 import { getDocsPath } from "../config.js";
@@ -62,6 +70,7 @@ import {
 } from "./extensions/index.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
+import type { PermissionGate } from "./permissions.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
 import type { BranchSummaryEntry, CompactionEntry, SessionManager } from "./session-manager.js";
@@ -154,6 +163,13 @@ export interface AgentSessionConfig {
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
+	/**
+	 * Opt-in approval gate for mutating tool calls. Omitted (the default) means auto-approve.
+	 * Subagent children share the parent's instance so their requests reach the parent's prompt.
+	 */
+	permissionGate?: PermissionGate;
+	/** Label identifying this session in approval prompts. Set for subagent children. */
+	permissionOrigin?: string;
 }
 
 export interface ExtensionBindings {
@@ -271,6 +287,8 @@ export class AgentSession {
 	private _initialActiveToolNames?: string[];
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
+	private _permissionGate?: PermissionGate;
+	private _permissionOrigin?: string;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
 	private _extensionShutdownHandler?: ShutdownHandler;
@@ -302,6 +320,8 @@ export class AgentSession {
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+		this._permissionGate = config.permissionGate;
+		this._permissionOrigin = config.permissionOrigin;
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -354,27 +374,19 @@ export class AgentSession {
 	 * happens here instead of in wrappers.
 	 */
 	private _installAgentToolHooks(): void {
-		this.agent.beforeToolCall = async ({ toolCall, args }) => {
-			const runner = this._extensionRunner;
-			if (!runner?.hasHandlers("tool_call")) {
-				return undefined;
+		this.agent.beforeToolCall = async ({ toolCall, args }, signal) => {
+			const extensionResult = await this._runExtensionToolCallHook(toolCall, args);
+			// An extension block short-circuits: no point prompting for a call that will not run.
+			if (extensionResult?.block) {
+				return extensionResult;
 			}
 
-			await this._agentEventQueue;
-
-			try {
-				return await runner.emitToolCall({
-					type: "tool_call",
-					toolName: toolCall.name,
-					toolCallId: toolCall.id,
-					input: args as Record<string, unknown>,
-				});
-			} catch (err) {
-				if (err instanceof Error) {
-					throw err;
-				}
-				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
+			const permissionResult = await this._checkToolPermission(toolCall, args, signal);
+			if (permissionResult) {
+				return permissionResult;
 			}
+
+			return extensionResult;
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
@@ -402,6 +414,66 @@ export class AgentSession {
 				details: hookResult.details,
 			};
 		};
+	}
+
+	private async _runExtensionToolCallHook(
+		toolCall: { name: string; id: string },
+		args: unknown,
+	): Promise<BeforeToolCallResult | undefined> {
+		const runner = this._extensionRunner;
+		if (!runner?.hasHandlers("tool_call")) {
+			return undefined;
+		}
+
+		await this._agentEventQueue;
+
+		try {
+			return await runner.emitToolCall({
+				type: "tool_call",
+				toolName: toolCall.name,
+				toolCallId: toolCall.id,
+				input: args as Record<string, unknown>,
+			});
+		} catch (err) {
+			if (err instanceof Error) {
+				throw err;
+			}
+			throw new Error(`Extension failed, blocking execution: ${String(err)}`);
+		}
+	}
+
+	/**
+	 * Ask the permission gate whether this call may run.
+	 *
+	 * Returns a block result when denied, or undefined to let the call proceed. With no gate
+	 * configured (the default) this is a single undefined check and nothing else changes.
+	 */
+	private async _checkToolPermission(
+		toolCall: { name: string },
+		args: unknown,
+		signal?: AbortSignal,
+	): Promise<BeforeToolCallResult | undefined> {
+		const gate = this._permissionGate;
+		if (!gate?.isEnabled()) {
+			return undefined;
+		}
+
+		const result = await gate.check(
+			{
+				toolName: toolCall.name,
+				args: (args ?? {}) as Record<string, unknown>,
+				cwd: this._cwd,
+				origin: this._permissionOrigin,
+			},
+			signal,
+		);
+
+		return result.allowed ? undefined : { block: true, reason: result.reason };
+	}
+
+	/** Permission gate for this session, when gating is configured. */
+	get permissionGate(): PermissionGate | undefined {
+		return this._permissionGate;
 	}
 
 	// =========================================================================

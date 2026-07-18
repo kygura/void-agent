@@ -495,6 +495,17 @@ export class TUI extends Container {
 		process.nextTick(() => this.scheduleRender());
 	}
 
+	/**
+	 * Wait for any pending or scheduled render to actually run. Renders are debounced via
+	 * process.nextTick + setTimeout, so a bare `await` after requestRender()/start() can observe
+	 * stale output. Tests should await this before asserting on terminal state.
+	 */
+	async waitForRender(): Promise<void> {
+		while (!this.stopped && (this.renderRequested || this.renderTimer !== undefined)) {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+	}
+
 	private scheduleRender(): void {
 		if (this.stopped || this.renderTimer || !this.renderRequested) {
 			return;
@@ -978,19 +989,28 @@ export class TUI extends Container {
 			return;
 		}
 
-		// Find first and last changed lines
+		// Find the changed range by skipping the common prefix and suffix. Typical
+		// interactive frames change only a small middle region, so this avoids comparing
+		// every line between the first and last change.
 		let firstChanged = -1;
 		let lastChanged = -1;
 		const maxLines = Math.max(newLines.length, this.previousLines.length);
 		for (let i = 0; i < maxLines; i++) {
 			const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
 			const newLine = i < newLines.length ? newLines[i] : "";
-
 			if (oldLine !== newLine) {
-				if (firstChanged === -1) {
-					firstChanged = i;
+				firstChanged = i;
+				break;
+			}
+		}
+		if (firstChanged !== -1) {
+			for (let i = maxLines - 1; i >= firstChanged; i--) {
+				const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
+				const newLine = i < newLines.length ? newLines[i] : "";
+				if (oldLine !== newLine) {
+					lastChanged = i;
+					break;
 				}
-				lastChanged = i;
 			}
 		}
 		const appendedLines = newLines.length > this.previousLines.length;

@@ -20,6 +20,8 @@ export interface VoidSpawnConfig {
 	systemPrompt?: string;
 	toolNames?: string[];
 	modelId?: string;
+	/** Overrides the child's tool-bound cwd (e.g. a worktree isolation path). Default: parent's cwd. */
+	cwd?: string;
 }
 
 /**
@@ -40,16 +42,18 @@ export class VoidHarness implements Harness {
 	readonly resumable = true;
 
 	private readonly pendingSpawns = new Map<string, VoidSpawnConfig>();
-	// ponytail: live-children-only resume - a providerSessionId only resolves while this
-	// process (and this Map) is alive. Upgrade path when cross-process/cross-restart resume is
-	// needed: respawn from the child's persisted session file (SpawnVoidChild would need a
-	// "resume existing session file" variant) instead of failing the resume as data below.
-	// Disposal (in run()'s finally) is safe today because no current caller ever passes
-	// providerSessionId back into startRun(), so nothing is ever actually resumed - the day a
-	// real resume caller shows up (threading sessionId through so a later call carries a
-	// matching providerSessionId), disposing here on every run would break it. That's the
-	// trigger to revisit: keep-alive would need to move to only fire for a session a live
-	// resume caller is tracking.
+	// ponytail: resume is no longer bounded by this process's lifetime - a providerSessionId
+	// missing from this Map (evicted, or this process restarted) falls through to
+	// spawnVoidChild({ resumeSessionId }), which respawns from the child's persisted session
+	// file (sdk.ts). The remaining ceiling is CHILD_CAP (~32) for in-memory reuse only: past
+	// that cap the oldest live child is evicted from this Map (still disposed eagerly), but a
+	// later resume against it just respawns from disk again instead of failing - the only true
+	// failure-as-data case left is an id whose session file never existed (or was removed).
+	// Bounded via a plain LRU cap (CHILD_CAP, ~32) instead of disposing on every completion or
+	// keeping children alive forever: a Map's insertion order doubles as recency order, so
+	// "touch" (moveToMru, called on fresh spawn and on resume lookup) is delete+reinsert, and
+	// eviction is just deleting the oldest key once size exceeds the cap. Upgrade path if 32 is
+	// ever wrong: make the cap configurable, not needed today.
 	private readonly children = new Map<string, AgentSession>();
 
 	constructor(private readonly spawnVoidChild: SpawnVoidChild) {}
@@ -62,6 +66,25 @@ export class VoidHarness implements Harness {
 	/** Cleans up a token registered by prepareSpawn() when startRun() throws before start() ever runs. */
 	cancelSpawn(token: string): void {
 		this.pendingSpawns.delete(token);
+	}
+
+	/**
+	 * Eagerly spawns a child now and returns its session id (= providerSessionId).
+	 * Used by the session-backed subagent path: the caller creates a HarnessRunManager
+	 * session pre-bound to this id, so the child's runs flow through the orchestrator's
+	 * session machinery (FIFO queue, resume) from birth. This sidesteps the prepareSpawn
+	 * token handoff, whose out-of-band spawn config cannot survive the session run path
+	 * (submitPrompt rebuilds run config from stored session fields, dropping extraArgs).
+	 */
+	async spawnChild(cfg: VoidSpawnConfig): Promise<string> {
+		const session = await this.spawnVoidChild({
+			systemPrompt: cfg.systemPrompt,
+			toolNames: cfg.toolNames,
+			modelId: cfg.modelId,
+			cwd: cfg.cwd,
+		});
+		this.registerChild(session);
+		return session.sessionId;
 	}
 
 	start(cfg: HarnessRunConfig, signal: AbortSignal): AsyncIterable<HarnessEvent> {
@@ -82,8 +105,13 @@ export class VoidHarness implements Harness {
 		if (session === undefined) return; // resolveSession already emitted a failed result + exit
 
 		if (signal.aborted) {
-			this.children.delete(session.sessionId);
-			session.dispose();
+			// Only dispose+evict a session this call freshly spawned. A resume's session is a
+			// live, resumable child owned by this.children long before this call - an incidental
+			// abort race here should just cancel this turn, not nuke the child for future resumes.
+			if (cfg.providerSessionId === undefined) {
+				this.children.delete(session.sessionId);
+				session.dispose();
+			}
 			pushCancelled(stream);
 			return;
 		}
@@ -119,19 +147,32 @@ export class VoidHarness implements Harness {
 		} finally {
 			unsubscribe();
 			signal.removeEventListener("abort", onAbort);
-			this.children.delete(session.sessionId);
-			session.dispose();
+			// Completed children stay in this.children, alive and resumable - only abort,
+			// LRU eviction, and manager close dispose a child now (see the ponytail comment
+			// on the children field).
 		}
 	}
 
-	/** Resolves the child for this run: a fresh spawn, or the live session for a resume. */
+	/** Resolves the child for this run: a live resume, a session-file respawn, or a fresh spawn. */
 	private async resolveSession(
 		cfg: HarnessRunConfig,
 		stream: EventStream<HarnessEvent, void>,
 	): Promise<AgentSession | undefined> {
 		if (cfg.providerSessionId !== undefined) {
-			const session = this.children.get(cfg.providerSessionId);
-			if (session === undefined) {
+			const live = this.children.get(cfg.providerSessionId);
+			if (live !== undefined) {
+				this.touch(cfg.providerSessionId, live);
+				return live;
+			}
+
+			// Not live (evicted, or this process restarted since it spawned) - attempt a
+			// session-file respawn before giving up. spawnVoidChild throws when the id's session
+			// file truly doesn't exist (see sdk.ts), which is the same "unknown or dead" outcome
+			// a never-spawned id already hits below.
+			let respawned: AgentSession;
+			try {
+				respawned = await this.spawnVoidChild({ resumeSessionId: cfg.providerSessionId, modelId: cfg.model });
+			} catch {
 				stream.push({
 					kind: "result",
 					timestamp: nowIso(),
@@ -141,7 +182,9 @@ export class VoidHarness implements Harness {
 				stream.push({ kind: "exit", timestamp: nowIso(), exitCode: 1 });
 				return undefined;
 			}
-			return session;
+			this.registerChild(respawned);
+			stream.push({ kind: "started", timestamp: nowIso(), providerSessionId: respawned.sessionId });
+			return respawned;
 		}
 
 		const token = cfg.extraArgs?.[0];
@@ -165,11 +208,44 @@ export class VoidHarness implements Harness {
 			stream.push({ kind: "exit", timestamp: nowIso(), exitCode: 1 });
 			return undefined;
 		}
-		this.children.set(session.sessionId, session);
+		this.registerChild(session);
 		stream.push({ kind: "started", timestamp: nowIso(), providerSessionId: session.sessionId });
 		return session;
 	}
+
+	/** Moves a child to MRU position (Map insertion order = recency order): delete + reinsert. */
+	private touch(id: string, session: AgentSession): void {
+		this.children.delete(id);
+		this.children.set(id, session);
+	}
+
+	/**
+	 * Inserts a (freshly spawned or respawned) child, evicting the oldest past CHILD_CAP -
+	 * skipping any child with a run currently in flight (session.isStreaming), so a busy LRU
+	 * cap never tears down a live run's transcript/event forwarding out from under it. If every
+	 * child is active, eviction is skipped for this call: a temporary excess over CHILD_CAP is
+	 * far better than silently corrupting a live run.
+	 */
+	private registerChild(session: AgentSession): void {
+		this.children.set(session.sessionId, session);
+		if (this.children.size > CHILD_CAP) {
+			let evictId: string | undefined;
+			for (const [id, child] of this.children) {
+				if (!child.isStreaming) {
+					evictId = id;
+					break;
+				}
+			}
+			if (evictId !== undefined) {
+				this.children.get(evictId)?.dispose();
+				this.children.delete(evictId);
+			}
+		}
+	}
 }
+
+/** Max live (resumable) children kept around at once; oldest is evicted past this. */
+const CHILD_CAP = 32;
 
 /** Cancelled-run convention shared with the orchestrator's ensureTerminalEvents and generic.ts's finalizeGeneric. */
 function pushCancelled(stream: EventStream<HarnessEvent, void>): void {

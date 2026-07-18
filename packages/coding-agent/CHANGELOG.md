@@ -9,7 +9,12 @@
 
 ### Added
 
+- Added built-in Kimi For Coding OAuth authentication using Kimi's device authorization flow.
 - Added the built-in `void` child orchestration extension with Provider selection, concurrent spawn, resume, cancellation, model and effort controls, and the `/agents` view.
+
+### Changed
+
+- Colored provider and model names in the interactive footer and configurable status line using the provider palette, with stronger styling for frontier models.
 
 ## [0.65.2] - 2026-04-06
 

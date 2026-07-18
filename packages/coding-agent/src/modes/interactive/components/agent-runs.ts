@@ -10,6 +10,7 @@ import type {
 import { truncateToWidth } from "@void/tui";
 import type { HarnessEvent, HarnessRun, HarnessRunManager } from "../../../core/harness/index.js";
 import type { SubagentRegistry, SubagentRunRecord } from "../../../core/tools/subagent.js";
+import { styleModel, styleProvider } from "../theme/provider-palette.js";
 import { theme } from "../theme/theme.js";
 
 export type AgentRunState = "pending" | "running" | "done" | "failed" | "cancelled";
@@ -135,6 +136,7 @@ export function collectAgentRuns(
 
 	for (const item of harnessRuns) {
 		if (linkedHarnessRunIds.has(item.id)) continue;
+		const lastActivity = lastHarnessActivity(item.events);
 		summaries.push({
 			id: item.id,
 			runId: item.id,
@@ -146,7 +148,7 @@ export function collectAgentRuns(
 			startTime: item.startTime,
 			...(item.endTime === undefined ? {} : { endTime: item.endTime }),
 			description: item.prompt,
-			...(lastHarnessActivity(item.events) === undefined ? {} : { lastActivity: lastHarnessActivity(item.events) }),
+			...(lastActivity === undefined ? {} : { lastActivity }),
 		});
 	}
 
@@ -191,12 +193,14 @@ export function renderRunRow(run: AgentRunSummary, width: number, now: number = 
 	const essential = `${glyph} ${theme.bold(run.name)}`;
 	if (width <= 24) return truncateToWidth(essential, Math.max(1, width));
 	const elapsed = formatElapsed(elapsedMs(run, now));
-	const metadata = theme.fg(
-		"muted",
-		[run.provider, run.model, run.effort, `${run.state} ${elapsed}`]
-			.filter((value) => value !== undefined)
-			.join(" · "),
-	);
+	const metadata = [
+		styleProvider(run.provider),
+		run.model === undefined ? undefined : styleModel(run.provider, run.model),
+		run.effort === undefined ? undefined : theme.fg("muted", run.effort),
+		theme.fg("muted", `${run.state} ${elapsed}`),
+	]
+		.filter((value): value is string => value !== undefined)
+		.join(theme.fg("dim", " · "));
 	const tail = run.lastActivity ?? run.description;
 	const line = `${essential}  ${metadata}${tail === undefined || tail === "" ? "" : `  ${theme.fg("dim", `· ${tail}`)}`}`;
 	return truncateToWidth(line, Math.max(1, width));

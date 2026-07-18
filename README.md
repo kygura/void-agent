@@ -1,6 +1,6 @@
 # void
 
-void is a TypeScript monorepo for building and running AI agents. It includes a terminal coding agent, a provider-neutral agent runtime, a multi-provider LLM API, terminal and web UI libraries, and supporting tools.
+void is a TypeScript monorepo for building and running AI agents. It includes a terminal coding agent, a provider-neutral agent runtime, a multi-provider LLM API, terminal and web UI libraries, headless child-agent orchestration, and supporting tools for Slack automation and GPU-hosted LLM deployments.
 
 ## Quick start
 
@@ -32,14 +32,14 @@ bun run install:global
 
 | Package | Purpose |
 | --- | --- |
-| [`@void/ai`](packages/ai) | Unified API for working with multiple LLM providers |
-| [`@void/agent`](packages/agent) | Agent runtime, tool calling, and state management |
-| [`@void/coding-agent`](packages/coding-agent) | Interactive coding agent and CLI |
-| [`@void/orchestrator`](packages/orchestrator) | Headless orchestration of provider-neutral child agents |
-| [`@void/tui`](packages/tui) | Terminal UI components and differential rendering |
-| [`@void/web-ui`](packages/web-ui) | Web components for AI interfaces |
-| [`@void/mom`](packages/mom) | Slack bot integration for the coding agent |
-| [`@void/pods`](packages/pods) | CLI for managing vLLM deployments on GPU pods |
+| [`@void/ai`](packages/ai) | Unified streaming/tool-calling API across 20+ LLM providers (OpenAI, Anthropic, Google, Bedrock, OpenRouter, local OpenAI-compatible servers, etc.), with OAuth login, cross-provider handoffs, and context serialization |
+| [`@void/agent`](packages/agent) | Stateful agent runtime built on `@void/ai`: event-streaming loop, parallel/sequential tool execution, steering and follow-up message queues, custom message types |
+| [`@void/coding-agent`](packages/coding-agent) | Terminal coding agent (`void` CLI). Interactive TUI, print/JSON/RPC modes, sessions with branching and compaction, and extensibility via extensions, skills, prompt templates, themes, and installable void packages |
+| [`@void/orchestrator`](packages/orchestrator) | TUI-free library for running headless coding-agent CLIs (Claude, Codex, generic, mock) as child processes, with Run/Session tracking, cancellation, native resume, and JSONL transcript persistence |
+| [`@void/tui`](packages/tui) | Terminal UI framework: differential rendering, synchronized output, overlays, and built-in components (Editor, Markdown, SelectList, Image, etc.) |
+| [`@void/web-ui`](packages/web-ui) | Web components (mini-lit + Tailwind) for building AI chat interfaces: chat panel, artifacts, attachments, IndexedDB-backed storage |
+| [`@void/mom`](packages/mom) | Self-managing Slack bot with bash/file tools, Docker sandboxing, persistent memory, custom skills, and scheduled events |
+| [`@void/pods`](packages/pods) | CLI for deploying and managing vLLM models on GPU pods (DataCrunch, RunPod, etc.) with automatic tool-calling configuration |
 
 ## Configuration
 

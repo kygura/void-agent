@@ -110,29 +110,39 @@ dependency-free of `packages/coding-agent`; it needs `spawnVoidChild`, which liv
      error text, followed by `"exit"` — a failed run with the error as its result text, not an
      unhandled rejection.
 
-2. **Subagent tool rewiring** — `packages/coding-agent/src/core/tools/subagent.ts`. Read the
-   current `execute()` body first (the harness-branch dispatch, including the `"void"` case,
-   wasn't fully visible during spec drafting — confirm the exact current branch before editing,
-   do not assume the line number). Change the `"void"` branch to do what the claude/codex
-   branches already do: create/reuse an orchestrator session via
-   `harnessRunManager.newSession("void")`, call `harnessRunManager.startRun("void", cfg,
-   sessionId)`, and reuse the existing `waitForHarnessRun` (`subagent.ts:181`) and
-   `harnessOutcome` (`subagent.ts:199`) helpers for both foreground (await) and background
-   (fire-and-forget + `notifyParent`) results — same as the claude/codex path already does.
-   Populate `harnessRunId` on the `SubagentRunRecord` (`subagent.ts:26`) so `openChildRun`
-   (`interactive-mode.ts:2428`) routes void children to the rich `kind: "session"`
-   `ChildSessionView`, same as claude/codex children. Delete `runVoidChild` (`subagent.ts:145`)
-   and any void-specific `kind: "external"` plumbing that becomes dead once this lands — grep
-   `interactive-mode.ts` and `agent-runs.ts` for callers before deleting anything.
+2. **Subagent tool rewiring** — `packages/coding-agent/src/core/tools/subagent.ts`. Change the
+   `"void"` branch to start through the same `harnessRunManager.startRun("void", cfg)` seam the
+   claude/codex branches already use, and populate `harnessRunId` on `SubagentRunRecord`
+   (`subagent.ts:26`) so live transcript, cancel, and background-notify work for void the same as
+   they already do for claude/codex subagent-tool runs. Delete `runVoidChild` (`subagent.ts:145`)
+   and any void-specific `kind: "external"` plumbing that becomes dead once this lands.
+
+   **Correction (post-implementation, verified against source by an independent review pass):**
+   the paragraph originally here claimed calling `harnessRunManager.newSession("void")` +
+   `startRun("void", cfg, sessionId)` would route void children to `kind: "session"`
+   `ChildSessionView` (resume composer, queue-while-running) "same as claude/codex children."
+   That premise was wrong — it conflated two separate `Orchestrator` instances. `openChildRun`
+   (`interactive-mode.ts:2428`) only reaches `kind: "session"`/`"task"` for runs whose `origin` is
+   `"session"`/`"task"`, and those origins come exclusively from
+   `ProcessLifetimeOrchestrationHost` (the `/spawn`/`/agent-resume` slash-command system).
+   Runs started via the **subagent tool** — void, claude, or codex alike — get `origin: "subagent"`
+   or `"harness"` from `HarnessRunManager`'s own, separate `Orchestrator` instance, which
+   `openChildRun` never checks; they always fall to `kind: "external"`, whose composer
+   (`getChildComposerRoute`, `child-session-view.ts:44`) is unconditionally disabled regardless of
+   `ProviderType`. So claude/codex subagent-tool children never had a resume composer either — the
+   "same as claude/codex" comparison point was accurate, just not to the rich session UI this
+   spec assumed. See the corrected "Done means" and "Out of scope" sections below.
 
 3. **`ProviderType` union** — add `"void"` to `packages/orchestrator/src/types.ts:38`
    (`export type ProviderType = "claude" | "codex" | "generic" | "mock";` → add `"void"`).
-   This is what makes `getChildComposerRoute` (`child-session-view.ts:43`) treat void children as
-   resumable instead of falling through to `generic`'s `disabled` branch. Grep the repo for
-   exhaustive `switch`/matching over `ProviderType` (e.g. `packages/orchestrator/src/config.ts`,
-   `packages/coding-agent/src/modes/interactive/components/agent-runs.ts`) and add the `"void"`
-   case everywhere TypeScript's exhaustiveness check would otherwise fail to compile — do not
-   leave a silent fallthrough.
+   `packages/orchestrator/src/providers.ts`'s exhaustive `switch (config.type)` in
+   `createProvider` needs (and, as implemented, has) an explicit `case "void": throw ...` since
+   void is registered directly by coding-agent's `sdk.ts`, not config-driven.
+   `packages/orchestrator/src/config.ts`'s `PROVIDER_TYPES` Set is a deliberately curated
+   **subset** for validating user-supplied config, not an exhaustive switch — it correctly
+   excludes `"void"` since a user can never legally write `type: "void"` in settings. (Original
+   drafting of this section incorrectly implied `config.ts` needed a `"void"` case too; verified
+   against source post-implementation, it does not.)
 
 4. **UI**: zero new components. Everything routes through the existing `kind: "session"`
    `ChildSessionView` path already built for claude/codex. No design brief needed, no design pass
@@ -146,8 +156,9 @@ dependency-free of `packages/coding-agent`; it needs `spawnVoidChild`, which liv
   `packages/coding-agent/test/subagent-tool.test.ts` for existing fakes/mocks for `AgentSession`
   and `HarnessRunManager` before writing new ones.
 - Extend `packages/coding-agent/test/orchestration-ui-interactions.test.ts` to cover entering a
-  void child (`kind: "session"`, not `"external"`) and submitting a follow-up through the resume
-  composer.
+  void child. **Corrected**: as implemented and verified, this stays `kind: "external"` (same as
+  claude/codex subagent-tool runs) — the test proves live transcript + cancel work, not a resume
+  composer (see the Part 2 item 2 correction above and "Done means" below).
 - Unit tests for `resolveAgentTools`'s alias map (Part 1).
 
 ## Done means
@@ -158,8 +169,11 @@ dependency-free of `packages/coding-agent`; it needs `spawnVoidChild`, which liv
   `package.json` defines, all green.
 - A void subagent spawned via `~/.claude/agents/*.md` (Claude Code tool names) gets a working
   non-empty tool list.
-- A void subagent's run is visible and interactive in the Sidebar/`/agents` overlay exactly like a
-  claude/codex child: live transcript, cancel, queue-while-running, resume composer.
+- A void subagent's run is visible and interactive in the Sidebar/`/agents` overlay **on par with
+  a claude/codex subagent-tool child**: live transcript, cancel, background-notify. **Corrected**:
+  the original bullet also promised "queue-while-running, resume composer" — verified
+  unreachable through this seam for any subagent-tool-spawned harness (void, claude, or codex),
+  not just void; see the Part 2 item 2 correction. Not delivered here, not a void-specific gap.
 - `runVoidChild` and dead void-`"external"` plumbing are deleted, not left dangling.
 
 ## Out of scope
@@ -167,3 +181,10 @@ dependency-free of `packages/coding-agent`; it needs `spawnVoidChild`, which liv
 - Any new UI component or visual redesign.
 - Respawn-from-session-file resume (v1 is live-children-only; leave the `ponytail:` comment).
 - Changes to claude/codex harness behavior.
+- **Follow-up, explicitly deferred, not started**: giving subagent-tool runs (any harness) a
+  resume composer / `kind: "session"` UI would require either unifying `HarnessRunManager`'s
+  `Orchestrator` with `ProcessLifetimeOrchestrationHost`'s, or teaching `openChildRun`/
+  `agent-runs.ts`'s origin classification and `ChildSessionView` to treat `HarnessRunManager`
+  sessions as session-kind targets too. Both are cross-cutting changes affecting all harness
+  types, not a void-only fix, and were never actually requested outside this spec's mistaken
+  premise that claude/codex already had it. Needs its own scoped design if a human wants it.

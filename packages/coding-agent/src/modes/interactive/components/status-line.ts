@@ -1,10 +1,12 @@
 import { basename } from "path";
+import { styleModel } from "../theme/provider-palette.js";
 
 /**
  * Data needed to render configurable statusline items (Settings.statusLine).
  * Pure/testable independent of TUI rendering or theme.
  */
 export interface StatusLineData {
+	modelProvider?: string;
 	modelId?: string;
 	modelSupportsThinking: boolean;
 	thinkingLevel: string;
@@ -58,7 +60,9 @@ function renderExtensionStatuses(extensionStatuses: ReadonlyMap<string, string>)
 function renderStatusItem(id: string, data: StatusLineData): string {
 	switch (id) {
 		case "model":
-			return data.modelId ?? "";
+			return data.modelId && data.modelProvider
+				? styleModel(data.modelProvider, data.modelId)
+				: (data.modelId ?? "");
 		case "thinking-level":
 			return data.modelSupportsThinking ? data.thinkingLevel : "";
 		case "current-dir":

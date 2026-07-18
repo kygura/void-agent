@@ -236,14 +236,31 @@ export class HarnessRunManager {
 		return this.bus.on(HARNESS_EVENT_CHANNEL, (data) => listener(data as HarnessRunEvent));
 	}
 
-	/** Creates an empty session bound to harnessId and returns its id. */
-	newSession(harnessId: string): string {
+	/**
+	 * Creates an empty session bound to harnessId and returns its id. `workdir`
+	 * is carried onto the session so every run it launches inherits the right
+	 * cwd (submitPrompt rebuilds run config from session fields, so a cwd not
+	 * stored here is lost). `providerSessionId`, when supplied, pre-binds the
+	 * session to an already-existing provider conversation so its very first run
+	 * resumes that conversation instead of starting a fresh one - used by the
+	 * subagent tool to point a session at a void child it spawned eagerly.
+	 */
+	newSession(harnessId: string, opts?: { workdir?: string; providerSessionId?: string }): string {
 		if (!this.harnesses.has(harnessId)) {
 			throw new Error(`harness: unknown harness "${harnessId}"`);
 		}
-		const id = this.orchestrator.createSession({ provider: harnessId });
+		const id = this.orchestrator.createSession({
+			provider: harnessId,
+			...(opts?.workdir === undefined ? {} : { workdir: opts.workdir }),
+			...(opts?.providerSessionId === undefined ? {} : { providerSessionId: opts.providerSessionId }),
+		});
 		const session = this.orchestrator.session(id);
-		this.store.appendMeta({ sessionId: id, harnessId, createdAt: session?.created ?? new Date().toISOString() });
+		this.store.appendMeta({
+			sessionId: id,
+			harnessId,
+			...(opts?.providerSessionId === undefined ? {} : { providerSessionId: opts.providerSessionId }),
+			createdAt: session?.created ?? new Date().toISOString(),
+		});
 		return id;
 	}
 

@@ -638,7 +638,7 @@ export class Orchestrator {
 		state: RunState,
 		failure: string | undefined,
 	): Promise<void> {
-		const cancelled = state === "cancelled";
+		const cancelled = run.cancelRequested;
 		if (!run.sawResult) {
 			run.sawResult = true;
 			const isError = cancelled || failure !== undefined;

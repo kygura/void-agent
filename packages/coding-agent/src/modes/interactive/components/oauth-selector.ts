@@ -2,6 +2,7 @@ import type { OAuthProviderInterface } from "@void/ai";
 import { getOAuthProviders } from "@void/ai/oauth";
 import { Container, getKeybindings, Spacer, TruncatedText } from "@void/tui";
 import type { AuthStorage } from "../../../core/auth-storage.js";
+import { cliCredentialSourceName } from "../../../core/cli-credentials.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 
@@ -68,10 +69,14 @@ export class OAuthSelectorComponent extends Container {
 
 			const isSelected = i === this.selectedIndex;
 
-			// Check if user is logged in for this provider
+			// Check if user is logged in for this provider. A credential borrowed
+			// from another CLI is not a void login, so it is labelled as such.
 			const credentials = this.authStorage.get(provider.id);
 			const isLoggedIn = credentials?.type === "oauth";
-			const statusIndicator = isLoggedIn ? theme.fg("success", " ✓ logged in") : "";
+			const borrowedFrom = this.authStorage.has(provider.id) ? undefined : cliCredentialSourceName(provider.id);
+			const statusIndicator = isLoggedIn
+				? theme.fg("success", borrowedFrom ? ` ✓ via ${borrowedFrom}` : " ✓ logged in")
+				: "";
 
 			let line = "";
 			if (isSelected) {

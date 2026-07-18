@@ -125,10 +125,10 @@ describe("VoidHarness", () => {
 		expect(fake.promptCalls).toEqual(["hi"]);
 	});
 
-	test("resume: a known providerSessionId reuses the live child instead of respawning, while it's still alive", async () => {
-		// Disposal now happens in run()'s finally (fix 1), so a session only remains resumable
-		// while its owning run is still in flight - this gates the first prompt open so the
-		// second (resuming) call lands before the first run's finally disposes it.
+	test("resume: a known providerSessionId reuses the live child instead of respawning, while the first run is still in flight", async () => {
+		// Gates the first prompt open so the second (resuming) call lands while the first run
+		// is still active, exercising resume-of-an-in-flight-child specifically (resume of a
+		// completed child is covered separately below).
 		let spawnCount = 0;
 		let releaseFirst = () => {};
 		const releaseGate = new Promise<void>((resolve) => {
@@ -158,9 +158,13 @@ describe("VoidHarness", () => {
 		expect(fake.promptCalls).toEqual(["first", "second"]);
 	});
 
-	test("resume: an unknown providerSessionId fails as data, not a thrown exception", async () => {
-		const spawnVoidChild: SpawnVoidChild = async () => {
-			throw new Error("should not spawn on a resume attempt");
+	test("resume: a truly unknown providerSessionId (never spawned, no session file) fails as data, not a thrown exception", async () => {
+		// Missing from this.children now triggers a respawn attempt (spawnVoidChild({ resumeSessionId })
+		// - see sdk.ts), which throws when no session file exists for the id. VoidHarness must catch
+		// that and fall back to the same "unknown or dead child session" failure-as-data result it
+		// always has, not let the error escape or change the message.
+		const spawnVoidChild: SpawnVoidChild = async (cfg) => {
+			throw new Error(`no session file for "${cfg.resumeSessionId}"`);
 		};
 		const harness = new VoidHarness(spawnVoidChild);
 
@@ -170,8 +174,58 @@ describe("VoidHarness", () => {
 
 		expect(events).toHaveLength(2);
 		expect(events[0]).toMatchObject({ kind: "result", isError: true });
-		expect((events[0] as { text?: string }).text).toContain("no-such-session");
+		expect((events[0] as { text?: string }).text).toBe('void: unknown or dead child session "no-such-session"');
 		expect(events[1]).toMatchObject({ kind: "exit", exitCode: 1 });
+	});
+
+	test("resume: an id missing from this.children (evicted, or this process restarted) respawns via spawnVoidChild({ resumeSessionId }) instead of failing immediately", async () => {
+		const resumeCalls: Array<{ resumeSessionId?: string; modelId?: string }> = [];
+		const fake = new FakeAgentSession("restored-1", async (_text, self) => {
+			self.setLastAssistantText("continued");
+		});
+		const spawnVoidChild: SpawnVoidChild = async (cfg) => {
+			resumeCalls.push({ resumeSessionId: cfg.resumeSessionId, modelId: cfg.modelId });
+			return asAgentSession(fake);
+		};
+		const harness = new VoidHarness(spawnVoidChild);
+
+		const events = await collect(
+			harness.start({ prompt: "resume please", providerSessionId: "restored-1" }, new AbortController().signal),
+		);
+
+		expect(resumeCalls).toEqual([{ resumeSessionId: "restored-1", modelId: undefined }]);
+		expect(events.map((e) => e.kind)).toEqual(["started", "result", "exit"]);
+		expect(events[0]).toMatchObject({ kind: "started", providerSessionId: "restored-1" });
+		expect(fake.promptCalls).toEqual(["resume please"]);
+
+		// Respawned child re-entered this.children: a second resume against the same id reuses it
+		// directly, no second respawn.
+		const followUp = await collect(
+			harness.start({ prompt: "again", providerSessionId: "restored-1" }, new AbortController().signal),
+		);
+		expect(followUp.map((e) => e.kind)).toEqual(["result", "exit"]); // no "started" - reused, not respawned
+		expect(resumeCalls).toHaveLength(1); // still just the one respawn
+		expect(fake.promptCalls).toEqual(["resume please", "again"]);
+	});
+
+	test("resume: a live child in this.children never attempts a session-file respawn", async () => {
+		let resumeAttempts = 0;
+		const fake = new FakeAgentSession("live-1", async (_text, self) => {
+			self.setLastAssistantText("done");
+		});
+		const spawnVoidChild: SpawnVoidChild = async (cfg) => {
+			if (cfg.resumeSessionId !== undefined) resumeAttempts++;
+			return asAgentSession(fake);
+		};
+		const harness = new VoidHarness(spawnVoidChild);
+
+		await collect(harness.start({ prompt: "first" }, new AbortController().signal)); // fresh spawn
+		const resumeEvents = await collect(
+			harness.start({ prompt: "second", providerSessionId: "live-1" }, new AbortController().signal),
+		);
+
+		expect(resumeAttempts).toBe(0); // live path short-circuits before ever calling spawnVoidChild again
+		expect(resumeEvents.map((e) => e.kind)).toEqual(["result", "exit"]);
 	});
 
 	test("abort during prompt: reports the run as cancelled (isError:true, exit 130), not done", async () => {
@@ -226,24 +280,143 @@ describe("VoidHarness", () => {
 		]);
 	});
 
-	test("normal completion: disposes the session and removes it from the resume map", async () => {
-		const fake = new FakeAgentSession("child-dispose", async (_text, self) => {
-			self.setLastAssistantText("done");
+	test("abort during an already-in-flight resume attempt: does NOT dispose/evict the live child, just cancels this turn", async () => {
+		const fake = new FakeAgentSession("child-resume-abort", async (text, self) => {
+			self.setLastAssistantText(`done: ${text}`);
 		});
 		const spawnVoidChild: SpawnVoidChild = async () => asAgentSession(fake);
 		const harness = new VoidHarness(spawnVoidChild);
 
+		// Fresh spawn first, so this.children holds a live, resumable child before the race below.
+		await collect(harness.start({ prompt: "first" }, new AbortController().signal));
+		expect(fake.promptCalls).toEqual(["first"]);
+
+		const controller = new AbortController();
+		// Same synchronous-abort-right-after-start() race as the fresh-spawn case above, but this
+		// time providerSessionId is set, so resolveSession takes the resume branch (an existing
+		// child from this.children, not a fresh spawn) - the early-abort branch in run() must not
+		// dispose/evict that child just because this turn's signal was already aborted.
+		const eventsPromise = collect(
+			harness.start({ prompt: "second", providerSessionId: "child-resume-abort" }, controller.signal),
+		);
+		controller.abort();
+		const events = await eventsPromise;
+
+		expect(fake.promptCalls).toEqual(["first"]); // "second" never prompted - cancelled before prompt()
+		expect(fake.disposeCalls).toBe(0); // resume's live child must survive this abort race
+		expect(events).toEqual([
+			expect.objectContaining({ kind: "result", isError: true, text: "Run cancelled" }),
+			expect.objectContaining({ kind: "exit", exitCode: 130 }),
+		]);
+
+		// Prove the child is still live in this.children: it resumes again instead of failing as
+		// unknown or triggering a fresh respawn.
+		const followUp = await collect(
+			harness.start({ prompt: "third", providerSessionId: "child-resume-abort" }, new AbortController().signal),
+		);
+		expect(followUp.map((e) => e.kind)).toEqual(["result", "exit"]); // no "started" - reused, not respawned
+		expect(fake.promptCalls).toEqual(["first", "third"]);
+	});
+
+	test("normal completion: keeps the session alive and resumable instead of disposing it", async () => {
+		let spawnCount = 0;
+		const fake = new FakeAgentSession("child-dispose", async (_text, self) => {
+			self.setLastAssistantText("done");
+		});
+		const spawnVoidChild: SpawnVoidChild = async () => {
+			spawnCount++;
+			return asAgentSession(fake);
+		};
+		const harness = new VoidHarness(spawnVoidChild);
+
 		await collect(harness.start({ prompt: "hi" }, new AbortController().signal));
 
-		expect(fake.disposeCalls).toBe(1);
+		expect(fake.disposeCalls).toBe(0);
 
-		// Session was removed from `children` on disposal, so a resume attempt against the same
-		// providerSessionId now fails as an unknown session instead of reusing the disposed child.
+		// Session stays in `children` after normal completion, so a resume attempt against the same
+		// providerSessionId reuses the same live child instead of respawning or failing as unknown.
 		const resumeEvents = await collect(
 			harness.start({ prompt: "resume?", providerSessionId: "child-dispose" }, new AbortController().signal),
 		);
-		expect(resumeEvents[0]).toMatchObject({ kind: "result", isError: true });
-		expect((resumeEvents[0] as { text?: string }).text).toContain("child-dispose");
+		expect(resumeEvents.map((e) => e.kind)).toEqual(["result", "exit"]); // no "started" - reused, not spawned
+		expect(spawnCount).toBe(1); // no respawn
+		expect(fake.promptCalls).toEqual(["hi", "resume?"]);
+	});
+
+	test("LRU eviction: past CHILD_CAP (32), the oldest evicted child now respawns via spawnVoidChild instead of failing, while a recent one is served straight from the live map", async () => {
+		const fakes: FakeAgentSession[] = [];
+		const bySessionId = new Map<string, FakeAgentSession>();
+		let respawnCount = 0;
+		const spawnVoidChild: SpawnVoidChild = async (cfg) => {
+			if (cfg.resumeSessionId !== undefined) {
+				// Simulates sdk.ts finding the id's session file on disk and reopening the same
+				// session (same underlying object here, since this fake has no real file backing).
+				const existing = bySessionId.get(cfg.resumeSessionId);
+				if (existing === undefined) throw new Error(`no session file for "${cfg.resumeSessionId}"`);
+				respawnCount++;
+				return asAgentSession(existing);
+			}
+			const fake = new FakeAgentSession(`child-${fakes.length}`, async (_text, self) => {
+				self.setLastAssistantText("done");
+			});
+			fakes.push(fake);
+			bySessionId.set(fake.sessionId, fake);
+			return asAgentSession(fake);
+		};
+		const harness = new VoidHarness(spawnVoidChild);
+
+		for (let i = 0; i < 33; i++) {
+			await collect(harness.start({ prompt: "hi" }, new AbortController().signal));
+		}
+
+		expect(fakes).toHaveLength(33);
+		expect(fakes[0].disposeCalls).toBe(1); // oldest evicted past the cap
+		expect(fakes[32].disposeCalls).toBe(0); // most recent still alive
+
+		// Evicted from the live map, but its "session file" (bySessionId, standing in for disk) still
+		// exists, so the resume respawns instead of failing.
+		const evictedResume = await collect(
+			harness.start({ prompt: "resume?", providerSessionId: fakes[0].sessionId }, new AbortController().signal),
+		);
+		expect(evictedResume.map((e) => e.kind)).toEqual(["started", "result", "exit"]); // respawned
+		expect(respawnCount).toBe(1);
+		expect(fakes[0].promptCalls).toEqual(["hi", "resume?"]);
+
+		const recentResume = await collect(
+			harness.start({ prompt: "resume?", providerSessionId: fakes[32].sessionId }, new AbortController().signal),
+		);
+		expect(recentResume.map((e) => e.kind)).toEqual(["result", "exit"]); // served from live map, no respawn
+		expect(respawnCount).toBe(1); // still just the one respawn (from the evicted-child case above)
+		expect(fakes[32].promptCalls).toEqual(["hi", "resume?"]);
+	});
+
+	test("LRU eviction respects touch(): resuming an early child bumps it to MRU, sparing it from eviction", async () => {
+		const fakes: FakeAgentSession[] = [];
+		const spawnVoidChild: SpawnVoidChild = async () => {
+			const fake = new FakeAgentSession(`child-${fakes.length}`, async (_text, self) => {
+				self.setLastAssistantText("done");
+			});
+			fakes.push(fake);
+			return asAgentSession(fake);
+		};
+		const harness = new VoidHarness(spawnVoidChild);
+
+		// Fill exactly to the cap: child-0..child-31, no eviction yet.
+		for (let i = 0; i < 32; i++) {
+			await collect(harness.start({ prompt: "hi" }, new AbortController().signal));
+		}
+
+		// Touch child-0 via resume, bumping it to MRU ahead of child-1 (the next-oldest untouched).
+		await collect(
+			harness.start({ prompt: "resume?", providerSessionId: fakes[0].sessionId }, new AbortController().signal),
+		);
+
+		// One more fresh spawn pushes size past the cap; the oldest untouched child (child-1) should
+		// be evicted instead of the touched child-0.
+		await collect(harness.start({ prompt: "hi" }, new AbortController().signal));
+
+		expect(fakes[0].disposeCalls).toBe(0); // touched - survived
+		expect(fakes[1].disposeCalls).toBe(1); // untouched and oldest - evicted
 	});
 
 	test("spawn failure: yields an error result + exit instead of an unhandled rejection", async () => {

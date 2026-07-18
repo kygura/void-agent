@@ -1,6 +1,10 @@
 import { ConfiguredProvider, MockProvider, Orchestrator } from "@void/orchestrator";
 import { describe, expect, it } from "vitest";
-import { resolveOrchestratorSettings } from "../src/core/orchestrator-config.js";
+import {
+	DEFAULT_MAX_CONCURRENT_SUBAGENTS,
+	resolveMaxConcurrentSubagents,
+	resolveOrchestratorSettings,
+} from "../src/core/orchestrator-config.js";
 
 describe("orchestrator Provider resolution", () => {
 	it("uses the exact defaults when orchestrator settings are missing", () => {
@@ -115,5 +119,48 @@ describe("orchestrator Provider resolution", () => {
 		expect(result.providers.fake).toBeInstanceOf(MockProvider);
 		expect(result.providers.fake.type).toBe("mock");
 		expect(result.orchestrator.snapshot().defaultProvider).toBe("fake");
+	});
+});
+
+describe("maxConcurrentSubagents", () => {
+	it("defaults when the config is missing entirely", () => {
+		expect(resolveMaxConcurrentSubagents(undefined)).toEqual({ value: DEFAULT_MAX_CONCURRENT_SUBAGENTS });
+	});
+
+	it("defaults when the field is absent from the orchestrator settings", () => {
+		expect(resolveMaxConcurrentSubagents({ defaultProvider: "claude", providers: {} })).toEqual({
+			value: DEFAULT_MAX_CONCURRENT_SUBAGENTS,
+		});
+	});
+
+	it.each([
+		["a string", "6"],
+		["zero", 0],
+		["negative", -1],
+		["a float", 3.5],
+	] as const)("reports a diagnostic and falls back to the default for %s", (_name, invalid) => {
+		const result = resolveMaxConcurrentSubagents({ maxConcurrentSubagents: invalid });
+
+		expect(result.value).toBe(DEFAULT_MAX_CONCURRENT_SUBAGENTS);
+		expect(result.diagnostic?.path).toBe("$.orchestrator.maxConcurrentSubagents");
+		expect(result.diagnostic?.code).toBe("invalid-value");
+	});
+
+	it("surfaces an explicit valid override with no diagnostic", () => {
+		const result = resolveMaxConcurrentSubagents({ maxConcurrentSubagents: 3 });
+
+		expect(result).toEqual({ value: 3 });
+	});
+
+	it("does not break Provider resolution when maxConcurrentSubagents sits alongside valid provider config", () => {
+		const result = resolveOrchestratorSettings({
+			orchestrator: {
+				defaultProvider: "fake",
+				maxConcurrentSubagents: 4,
+				providers: { fake: { type: "mock" } },
+			},
+		});
+
+		expect(result.ok).toBe(true);
 	});
 });

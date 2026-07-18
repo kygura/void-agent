@@ -25,6 +25,7 @@ export class ConfiguredProvider implements ChildProvider {
 	public readonly resumable: boolean;
 	public readonly authAdapter?: AuthAdapter;
 	public readonly config: ProviderConfig;
+	private authRefresh: Promise<void> | undefined;
 
 	public constructor(
 		name: string,
@@ -64,10 +65,26 @@ export class ConfiguredProvider implements ChildProvider {
 
 	private async *startRun(config: RunConfig, signal?: AbortSignal): AsyncIterable<Event> {
 		try {
+			await this.refreshAuthState(signal);
 			yield* this.base.start(this.mergedRunConfig(config), signal);
 		} catch (error) {
 			yield* failedRun(error instanceof Error ? error.message : String(error));
 		}
+	}
+
+	private async refreshAuthState(signal?: AbortSignal): Promise<void> {
+		if (this.authAdapter === undefined) return;
+		if (this.authRefresh === undefined) {
+			const refresh = this.authAdapter
+				.status(signal)
+				.then((status) => this.authCache.set(this.name, status))
+				.catch(() => this.authCache.set(this.name, { loggedIn: false }))
+				.finally(() => {
+					if (this.authRefresh === refresh) this.authRefresh = undefined;
+				});
+			this.authRefresh = refresh;
+		}
+		await this.authRefresh;
 	}
 }
 
@@ -81,12 +98,18 @@ export function createProvider(
 	let authAdapter: AuthAdapter | undefined;
 	switch (config.type) {
 		case "claude":
-			base = new ClaudeProvider();
-			authAdapter = createChildAuthAdapter("claude", options.claudeAuth);
+			base = new ClaudeProvider(config.command === undefined ? {} : { command: config.command });
+			authAdapter = createChildAuthAdapter("claude", {
+				...(config.command === undefined ? {} : { command: config.command }),
+				...options.claudeAuth,
+			});
 			break;
 		case "codex":
-			base = new CodexProvider();
-			authAdapter = createChildAuthAdapter("codex", options.codexAuth);
+			base = new CodexProvider(config.command === undefined ? {} : { command: config.command });
+			authAdapter = createChildAuthAdapter("codex", {
+				...(config.command === undefined ? {} : { command: config.command }),
+				...options.codexAuth,
+			});
 			break;
 		case "generic":
 			base = new GenericProvider(genericTemplate(name, config));

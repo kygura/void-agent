@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Agent, type AgentMessage, type ThinkingLevel } from "@void/agent";
 import { type Message, type Model, streamSimple } from "@void/ai";
@@ -10,6 +11,7 @@ import { createDefaultHarnesses, HarnessRunManager, VoidHarness } from "./harnes
 import { convertToLlm } from "./messages.js";
 import { ModelRegistry } from "./model-registry.js";
 import { findExactModelReferenceMatch, findInitialModel } from "./model-resolver.js";
+import type { PermissionGate } from "./permissions.js";
 import type { ResourceLoader } from "./resource-loader.js";
 import { DefaultResourceLoader } from "./resource-loader.js";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
@@ -41,6 +43,7 @@ import {
 } from "./tools/index.js";
 import {
 	createSubagentOutputToolDefinition,
+	createSubagentSendToolDefinition,
 	createSubagentToolDefinition,
 	resolveAgentTools,
 	type SpawnVoidChild,
@@ -88,6 +91,16 @@ export interface CreateAgentSessionOptions {
 	harnessRunManager?: HarnessRunManager;
 	/** Internal: nesting level of this session in a subagent tree (0 = top-level). Set by the subagent tool's child spawner. */
 	subagentDepth?: number;
+
+	/**
+	 * Approval gate for mutating tool calls. Omit (the default) to auto-approve everything.
+	 *
+	 * Subagent children are spawned in-process and are handed this same instance, so a child's
+	 * request is escalated to the parent's approval queue instead of hanging on a TTY it lacks.
+	 */
+	permissionGate?: PermissionGate;
+	/** Internal: label shown in approval prompts for this session. Set by the child spawner. */
+	permissionOrigin?: string;
 }
 
 /** Result from createAgentSession */
@@ -116,6 +129,14 @@ export type {
 	SlashCommandSource,
 	ToolDefinition,
 } from "./extensions/index.js";
+export {
+	isMutatingTool,
+	MUTATING_TOOL_NAMES,
+	type PermissionApprover,
+	type PermissionDecision,
+	PermissionGate,
+	type PermissionRequest,
+} from "./permissions.js";
 export type { PromptTemplate } from "./prompt-templates.js";
 export type { Skill } from "./skills.js";
 export type { Tool } from "./tools/index.js";
@@ -262,6 +283,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = "off";
 	}
 
+	// options.tools carries actual tool instances (e.g. rebound to a worktree-isolated child's
+	// cwd by resolveAgentTools) - baseToolsOverride is what makes AgentSession use those instances
+	// instead of rebuilding its own set from `cwd`. Without it, only the tool *names* would survive
+	// into initialActiveToolNames and the session would silently fall back to cwd-bound tools.
+	const baseToolsOverride = options.tools
+		? Object.fromEntries(options.tools.map((tool) => [tool.name, tool]))
+		: undefined;
 	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
 	const initialActiveToolNames: string[] = options.tools
 		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allTools)
@@ -273,10 +301,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const parentSessionRef: { current?: AgentSession } = {};
 	let subagentTool: ToolDefinition<any, any, any> | undefined;
 	let subagentOutputTool: ToolDefinition<any, any, any> | undefined;
+	let subagentSendTool: ToolDefinition<any, any, any> | undefined;
 	let subagentRegistry: SubagentRegistry | undefined;
 	let harnessRunManager: HarnessRunManager | undefined;
 	if (subagentToolsEnabled) {
-		initialActiveToolNames.push("subagent", "subagent_output");
+		initialActiveToolNames.push("subagent", "subagent_output", "subagent_send");
 
 		// The child spawner is injected as a callback (rather than subagent.ts importing
 		// createAgentSession) to avoid a module cycle: subagent.ts -> sdk.ts -> subagent.ts.
@@ -295,15 +324,48 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					: {}),
 			});
 			await childLoader.reload();
+			// Resume: find the session file for the requested id the same way SessionManager.create/
+			// getDefaultSessionDir already do (same sessionDir, filename = `<timestamp>_<id>.jsonl`) and
+			// hand SessionManager.open() its path instead of letting createAgentSession default to a
+			// fresh SessionManager.create(...). A missing file is a normal "resume target not found"
+			// case (never spawned, or evicted past this process's lifetime) - throw so the caller
+			// (VoidHarness.resolveSession) can convert it into its existing failed-run event. A file
+			// that exists but is corrupt is SessionManager.open's own problem to tolerate, not ours.
+			let resumedSessionManager: SessionManager | undefined;
+			if (childConfig.resumeSessionId) {
+				const sessionDir = getDefaultSessionDir(cwd, agentDir);
+				const fileName = existsSync(sessionDir)
+					? readdirSync(sessionDir).find((f) => f.endsWith(`_${childConfig.resumeSessionId}.jsonl`))
+					: undefined;
+				if (!fileName) {
+					throw new Error(`void: unknown or dead child session "${childConfig.resumeSessionId}"`);
+				}
+				resumedSessionManager = SessionManager.open(join(sessionDir, fileName), sessionDir, cwd);
+			}
+			// ponytail: only the child's tools (bash/edit/write/read/grep/find/ls) are rebound to
+			// childConfig.cwd (e.g. a worktree isolation path) - session storage/resourceLoader/the
+			// AgentSession's own reported cwd stay anchored at the parent's cwd. Rebinding those too
+			// would move a fresh child's session file under a worktree-hashed sessionDir, but the
+			// resume-by-id lookup just above always searches getDefaultSessionDir(cwd, agentDir) off
+			// the parent's cwd - so a worktree-isolated child would become unresumable after eviction/
+			// restart. Upgrade path if nested-subagent isolation or accurate cwd display ever matters:
+			// make that resume lookup search per-child, not just the parent's bucket, then thread
+			// childConfig.cwd through here too.
 			const { session: childSession } = await createAgentSession({
 				cwd,
 				agentDir,
 				modelRegistry,
 				model: childModel,
-				tools: resolveAgentTools(cwd, childConfig.toolNames),
+				tools: resolveAgentTools(childConfig.cwd ?? cwd, childConfig.toolNames),
 				resourceLoader: childLoader,
 				settingsManager,
 				subagentDepth: subagentDepth + 1,
+				// Children have no TTY of their own. Sharing the parent's gate escalates their
+				// mutating calls to the parent's prompt queue; if no approver is attached there
+				// the gate denies rather than waiting on a prompt nobody can answer.
+				...(options.permissionGate ? { permissionGate: options.permissionGate } : {}),
+				permissionOrigin: "subagent",
+				...(resumedSessionManager ? { sessionManager: resumedSessionManager } : {}),
 			});
 			return childSession;
 		};
@@ -314,13 +376,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			for (const harness of createDefaultHarnesses()) harnessRunManager.registerHarness(harness);
 			harnessRunManager.registerHarness(new VoidHarness(spawnVoidChild));
 		}
-		subagentTool = createSubagentToolDefinition({
+		const subagentOpts = {
 			cwd,
+			agentDir,
 			harnessRunManager,
 			registry: subagentRegistry,
 			parentSessionRef,
-		});
+			settingsManager,
+		};
+		subagentTool = createSubagentToolDefinition(subagentOpts);
 		subagentOutputTool = createSubagentOutputToolDefinition(subagentRegistry);
+		subagentSendTool = createSubagentSendToolDefinition(subagentOpts);
 	}
 
 	let agent: Agent;
@@ -428,11 +494,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			...(options.customTools ?? []),
 			...(subagentTool ? [subagentTool] : []),
 			...(subagentOutputTool ? [subagentOutputTool] : []),
+			...(subagentSendTool ? [subagentSendTool] : []),
 		],
 		modelRegistry,
 		initialActiveToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
+		...(options.permissionGate ? { permissionGate: options.permissionGate } : {}),
+		...(options.permissionOrigin ? { permissionOrigin: options.permissionOrigin } : {}),
+		...(baseToolsOverride ? { baseToolsOverride } : {}),
 	});
 	parentSessionRef.current = session;
 	const extensionsResult = resourceLoader.getExtensions();

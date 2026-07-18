@@ -73,6 +73,17 @@ export {
 	truncateTail,
 } from "./truncate.js";
 export {
+	createWebSearchTool,
+	createWebSearchToolDefinition,
+	type WebSearchOperations,
+	type WebSearchResult,
+	type WebSearchToolDetails,
+	type WebSearchToolInput,
+	type WebSearchToolOptions,
+	webSearchTool,
+	webSearchToolDefinition,
+} from "./web-search.js";
+export {
 	createWriteTool,
 	createWriteToolDefinition,
 	type WriteOperations,
@@ -102,13 +113,19 @@ import {
 	readTool,
 	readToolDefinition,
 } from "./read.js";
+import {
+	createWebSearchTool,
+	createWebSearchToolDefinition,
+	webSearchTool,
+	webSearchToolDefinition,
+} from "./web-search.js";
 import { createWriteTool, createWriteToolDefinition, writeTool, writeToolDefinition } from "./write.js";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
 
-export const codingTools: Tool[] = [readTool, bashTool, editTool, writeTool];
-export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool];
+export const codingTools: Tool[] = [readTool, bashTool, editTool, writeTool, webSearchTool];
+export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool, webSearchTool];
 
 export const allTools = {
 	read: readTool,
@@ -118,6 +135,7 @@ export const allTools = {
 	grep: grepTool,
 	find: findTool,
 	ls: lsTool,
+	webSearch: webSearchTool,
 };
 
 export const allToolDefinitions = {
@@ -128,6 +146,7 @@ export const allToolDefinitions = {
 	grep: grepToolDefinition,
 	find: findToolDefinition,
 	ls: lsToolDefinition,
+	webSearch: webSearchToolDefinition,
 };
 
 export type ToolName = keyof typeof allTools;
@@ -143,6 +162,7 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 		createBashToolDefinition(cwd, options?.bash),
 		createEditToolDefinition(cwd),
 		createWriteToolDefinition(cwd),
+		createWebSearchToolDefinition(cwd),
 	];
 }
 
@@ -152,6 +172,7 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 		createGrepToolDefinition(cwd),
 		createFindToolDefinition(cwd),
 		createLsToolDefinition(cwd),
+		createWebSearchToolDefinition(cwd),
 	];
 }
 
@@ -164,6 +185,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		grep: createGrepToolDefinition(cwd),
 		find: createFindToolDefinition(cwd),
 		ls: createLsToolDefinition(cwd),
+		webSearch: createWebSearchToolDefinition(cwd),
 	};
 }
 
@@ -173,11 +195,18 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 		createBashTool(cwd, options?.bash),
 		createEditTool(cwd),
 		createWriteTool(cwd),
+		createWebSearchTool(cwd),
 	];
 }
 
 export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[] {
-	return [createReadTool(cwd, options?.read), createGrepTool(cwd), createFindTool(cwd), createLsTool(cwd)];
+	return [
+		createReadTool(cwd, options?.read),
+		createGrepTool(cwd),
+		createFindTool(cwd),
+		createLsTool(cwd),
+		createWebSearchTool(cwd),
+	];
 }
 
 export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
@@ -189,5 +218,6 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		grep: createGrepTool(cwd),
 		find: createFindTool(cwd),
 		ls: createLsTool(cwd),
+		webSearch: createWebSearchTool(cwd),
 	};
 }

@@ -12,6 +12,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "f
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { getAgentDir } from "../config.js";
+import { readCliOAuthCredentials } from "./cli-credentials.js";
 import { resolveConfigValue } from "./resolve-config-value.js";
 
 export type ApiKeyCredential = {
@@ -26,6 +27,19 @@ export type OAuthCredential = {
 export type AuthCredential = ApiKeyCredential | OAuthCredential;
 
 export type AuthStorageData = Record<string, AuthCredential>;
+
+/**
+ * Reserved top-level key in auth.json holding provider ids the user explicitly
+ * logged out of. It is stripped from the credential map on load and re-attached
+ * on save, so it never reaches `list()`, `has()` or `getAll()`. Files written
+ * before this key existed simply parse to an empty opt-out list.
+ */
+const CLI_FALLBACK_OPT_OUT_KEY = "$cliFallbackOptOut";
+
+type ParsedAuthFile = {
+	credentials: AuthStorageData;
+	optOut: string[];
+};
 
 type LockResult<T> = {
 	result: T;
@@ -180,6 +194,9 @@ export class AuthStorage {
 	private data: AuthStorageData = {};
 	private runtimeOverrides: Map<string, string> = new Map();
 	private fallbackResolver?: (provider: string) => string | undefined;
+	private cliCredentials: Map<string, OAuthCredential | null> = new Map();
+	/** Providers the user logged out of; their CLI fallback stays disabled. */
+	private cliFallbackOptOut: Set<string> = new Set();
 	private loadError: Error | null = null;
 	private errors: Error[] = [];
 
@@ -229,24 +246,39 @@ export class AuthStorage {
 		this.errors.push(normalizedError);
 	}
 
-	private parseStorageData(content: string | undefined): AuthStorageData {
+	private parseAuthFile(content: string | undefined): ParsedAuthFile {
 		if (!content) {
-			return {};
+			return { credentials: {}, optOut: [] };
 		}
-		return JSON.parse(content) as AuthStorageData;
+		const { [CLI_FALLBACK_OPT_OUT_KEY]: optOut, ...credentials } = JSON.parse(content) as Record<string, unknown>;
+		return {
+			credentials: credentials as AuthStorageData,
+			optOut: Array.isArray(optOut) ? optOut.filter((id): id is string => typeof id === "string") : [],
+		};
+	}
+
+	private serializeAuthFile(file: ParsedAuthFile): string {
+		const out: Record<string, unknown> = { ...file.credentials };
+		if (file.optOut.length > 0) {
+			out[CLI_FALLBACK_OPT_OUT_KEY] = file.optOut;
+		}
+		return JSON.stringify(out, null, 2);
 	}
 
 	/**
 	 * Reload credentials from storage.
 	 */
 	reload(): void {
+		this.cliCredentials.clear();
 		let content: string | undefined;
 		try {
 			this.storage.withLock((current) => {
 				content = current;
 				return { result: undefined };
 			});
-			this.data = this.parseStorageData(content);
+			const file = this.parseAuthFile(content);
+			this.data = file.credentials;
+			this.cliFallbackOptOut = new Set(file.optOut);
 			this.loadError = null;
 		} catch (error) {
 			this.loadError = error as Error;
@@ -254,21 +286,27 @@ export class AuthStorage {
 		}
 	}
 
-	private persistProviderChange(provider: string, credential: AuthCredential | undefined): void {
+	/**
+	 * Persist a credential change, and with it whether the provider's CLI
+	 * fallback stays opted out. Logout opts out (durably, so a borrowed
+	 * credential cannot silently come back); login opts back in.
+	 */
+	private persistProviderChange(provider: string, credential: AuthCredential | undefined, optOut: boolean): void {
 		if (this.loadError) {
 			return;
 		}
 
 		try {
 			this.storage.withLock((current) => {
-				const currentData = this.parseStorageData(current);
-				const merged: AuthStorageData = { ...currentData };
+				const file = this.parseAuthFile(current);
 				if (credential) {
-					merged[provider] = credential;
+					file.credentials[provider] = credential;
 				} else {
-					delete merged[provider];
+					delete file.credentials[provider];
 				}
-				return { result: undefined, next: JSON.stringify(merged, null, 2) };
+				const others = file.optOut.filter((id) => id !== provider);
+				file.optOut = optOut ? [...others, provider] : others;
+				return { result: undefined, next: this.serializeAuthFile(file) };
 			});
 		} catch (error) {
 			this.recordError(error);
@@ -276,10 +314,32 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Credential from an installed CLI (Claude Code, Codex), cached per process.
+	 * Read-only: these are never written back to their origin file.
+	 *
+	 * Single choke point for the fallback, so `get()`, `hasAuth()` and
+	 * `getApiKey()` cannot disagree about an opted-out provider.
+	 */
+	private cliCredential(provider: string): OAuthCredential | undefined {
+		if (this.cliFallbackOptOut.has(provider)) {
+			return undefined;
+		}
+		const cached = this.cliCredentials.get(provider);
+		if (cached !== undefined && (cached === null || Date.now() < cached.expires)) {
+			return cached ?? undefined;
+		}
+		const credentials = readCliOAuthCredentials(provider);
+		const credential: OAuthCredential | null = credentials ? { type: "oauth", ...credentials } : null;
+		this.cliCredentials.set(provider, credential);
+		return credential ?? undefined;
+	}
+
+	/**
 	 * Get credential for a provider.
+	 * Falls back to an installed CLI's credentials when void has none of its own.
 	 */
 	get(provider: string): AuthCredential | undefined {
-		return this.data[provider] ?? undefined;
+		return this.data[provider] ?? this.cliCredential(provider);
 	}
 
 	/**
@@ -287,15 +347,19 @@ export class AuthStorage {
 	 */
 	set(provider: string, credential: AuthCredential): void {
 		this.data[provider] = credential;
-		this.persistProviderChange(provider, credential);
+		this.cliFallbackOptOut.delete(provider);
+		this.persistProviderChange(provider, credential, false);
 	}
 
 	/**
-	 * Remove credential for a provider.
+	 * Remove credential for a provider. Also opts the provider out of the CLI
+	 * fallback: without that, logout would report success while `get()` kept
+	 * handing back another CLI's borrowed token.
 	 */
 	remove(provider: string): void {
 		delete this.data[provider];
-		this.persistProviderChange(provider, undefined);
+		this.cliFallbackOptOut.add(provider);
+		this.persistProviderChange(provider, undefined, true);
 	}
 
 	/**
@@ -320,6 +384,7 @@ export class AuthStorage {
 		if (this.runtimeOverrides.has(provider)) return true;
 		if (this.data[provider]) return true;
 		if (getEnvApiKey(provider)) return true;
+		if (this.cliCredential(provider)) return true;
 		if (this.fallbackResolver?.(provider)) return true;
 		return false;
 	}
@@ -370,8 +435,10 @@ export class AuthStorage {
 		}
 
 		const result = await this.storage.withLockAsync(async (current) => {
-			const currentData = this.parseStorageData(current);
+			const file = this.parseAuthFile(current);
+			const currentData = file.credentials;
 			this.data = currentData;
+			this.cliFallbackOptOut = new Set(file.optOut);
 			this.loadError = null;
 
 			const cred = currentData[providerId];
@@ -401,7 +468,7 @@ export class AuthStorage {
 			};
 			this.data = merged;
 			this.loadError = null;
-			return { result: refreshed, next: JSON.stringify(merged, null, 2) };
+			return { result: refreshed, next: this.serializeAuthFile({ credentials: merged, optOut: file.optOut }) };
 		});
 
 		return result;
@@ -414,7 +481,8 @@ export class AuthStorage {
 	 * 2. API key from auth.json
 	 * 3. OAuth token from auth.json (auto-refreshed with locking)
 	 * 4. Environment variable
-	 * 5. Fallback resolver (models.json custom providers)
+	 * 5. OAuth token from an installed CLI's own credential file (read-only)
+	 * 6. Fallback resolver (models.json custom providers)
 	 */
 	async getApiKey(providerId: string, options?: { includeFallback?: boolean }): Promise<string | undefined> {
 		// Runtime override takes highest priority
@@ -470,6 +538,14 @@ export class AuthStorage {
 		// Fall back to environment variable
 		const envKey = getEnvApiKey(providerId);
 		if (envKey) return envKey;
+
+		// Fall back to an account already logged into an installed CLI (read-only).
+		// Expired CLI tokens are reported as absent, so no refresh happens here.
+		const cliCred = this.cliCredential(providerId);
+		const cliProvider = cliCred ? getOAuthProvider(providerId) : undefined;
+		if (cliCred && cliProvider) {
+			return cliProvider.getApiKey(cliCred);
+		}
 
 		// Fall back to custom resolver (e.g., models.json custom providers)
 		if (options?.includeFallback !== false) {

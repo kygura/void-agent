@@ -33,7 +33,7 @@ describe("TUI overlay with short content", () => {
 
 		// Trigger render
 		tui.start();
-		await new Promise((r) => process.nextTick(r));
+		await tui.waitForRender();
 		await terminal.flush();
 
 		const viewport = terminal.getViewport();
