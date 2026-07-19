@@ -15,7 +15,7 @@ export interface ReasoningBarData {
 
 /**
  * Step the thinking level by `delta` positions within the available levels.
- * Clamps at both ends (no wrap-around, unlike the shift+tab cycle).
+ * Clamps at both ends without wrapping around.
  */
 export function stepThinkingLevel(
 	current: ThinkingLevel,
@@ -31,9 +31,12 @@ export function stepThinkingLevel(
 
 function buildReasoningBlocks(data: ReasoningBarData): string {
 	const currentIndex = Math.max(0, data.availableLevels.indexOf(data.thinkingLevel));
+	const filledThrough = data.thinkingLevel === "off" ? -1 : currentIndex;
 	const splashBands = getActiveSplashBandStyles();
 	return data.availableLevels
-		.map((_level, index) => (index > currentIndex ? theme.fg("dim", EMPTY_BLOCK) : splashBands[index]!(FILLED_BLOCK)))
+		.map((_level, index) =>
+			index > filledThrough ? theme.fg("dim", EMPTY_BLOCK) : splashBands[index]!(FILLED_BLOCK),
+		)
 		.join("");
 }
 

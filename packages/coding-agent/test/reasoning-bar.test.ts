@@ -38,8 +38,10 @@ describe("buildReasoningBar", () => {
 		expect(stripAnsi(line)).toBe("████░░ medium");
 	});
 
-	it("fills only the first block at the lowest level", () => {
-		expect(blocks(buildReasoningBar(baseData({ thinkingLevel: "off" }), 80))).toBe("█░░░░░");
+	it("leaves every block empty when thinking is off", () => {
+		const data = baseData({ thinkingLevel: "off" });
+		expect(blocks(buildReasoningBar(data, 80))).toBe("░░░░░░");
+		expect(stripAnsi(buildReasoningGauge(data, 80))).toBe("░░░░░░");
 	});
 
 	it("fills every block at the highest level", () => {

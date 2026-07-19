@@ -5,7 +5,7 @@ import type { AgentSession } from "../src/core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.js";
 import { FooterComponent } from "../src/modes/interactive/components/footer.js";
 import { buildStatusLineItems, type StatusLineData } from "../src/modes/interactive/components/status-line.js";
-import { styleModel, styleProvider } from "../src/modes/interactive/theme/provider-palette.js";
+import { styleModel } from "../src/modes/interactive/theme/provider-palette.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
 function baseData(overrides: Partial<StatusLineData> = {}): StatusLineData {
@@ -227,7 +227,7 @@ describe("FooterComponent statusline integration", () => {
 		expect(stripAnsi(lines[1]!)).toBe("12.3%/200k (auto)");
 	});
 
-	it("colors the legacy footer provider and frontier model with their palette", () => {
+	it("colors the legacy footer model with its palette", () => {
 		const session = createSession({
 			settingsManager: "unset",
 			provider: "anthropic",
@@ -236,8 +236,8 @@ describe("FooterComponent statusline integration", () => {
 		const footer = new FooterComponent(session, createFooterData(2));
 		const lines = footer.render(80);
 
-		expect(lines[1]).toContain(styleProvider("anthropic"));
 		expect(lines[1]).toContain(styleModel("anthropic", "claude-fable"));
+		expect(lines[1]).not.toContain("(anthropic)");
 	});
 
 	it("renders a single themed line when statusLine is configured", () => {

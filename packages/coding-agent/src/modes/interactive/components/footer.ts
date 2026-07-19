@@ -3,7 +3,7 @@ import { type Component, truncateToWidth, visibleWidth } from "@void/tui";
 import { VERSION } from "../../../config.js";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
-import { styleModel, styleProvider } from "../theme/provider-palette.js";
+import { styleModel } from "../theme/provider-palette.js";
 import { theme } from "../theme/theme.js";
 import { buildReasoningGauge } from "./reasoning-bar.js";
 import { buildStatusLineItems, formatTokens, type StatusLineData, sanitizeStatusText } from "./status-line.js";
@@ -153,7 +153,7 @@ export class FooterComponent implements Component {
 					width,
 				)
 			: "";
-		const rightSideWithoutProvider = reasoningGauge ? `${modelName} ${reasoningGauge}` : modelName;
+		const rightSide = reasoningGauge ? `${modelName} ${reasoningGauge}` : modelName;
 
 		let statsLeftWidth = visibleWidth(statsLeft);
 
@@ -165,19 +165,6 @@ export class FooterComponent implements Component {
 
 		// Calculate available space for padding (minimum 2 spaces between stats and model)
 		const minPadding = 2;
-
-		// Prepend the provider in parentheses if there are multiple providers and there's enough room
-		let rightSide = rightSideWithoutProvider;
-		let showProvider = false;
-		if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
-			rightSide = `(${state.model.provider}) ${rightSideWithoutProvider}`;
-			if (statsLeftWidth + minPadding + visibleWidth(rightSide) > width) {
-				// Too wide, fall back
-				rightSide = rightSideWithoutProvider;
-			} else {
-				showProvider = true;
-			}
-		}
 
 		const rightSideWidth = visibleWidth(rightSide);
 		const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
@@ -204,9 +191,7 @@ export class FooterComponent implements Component {
 		let styledRight = theme.fg("dim", displayedRight);
 		if (state.model && displayedRight) {
 			const styledGauge = reasoningGauge ? ` ${reasoningGauge}` : "";
-			const styledFullRight = showProvider
-				? `${theme.fg("dim", "(")}${styleProvider(state.model.provider)}${theme.fg("dim", ") ")}${styleModel(state.model.provider, modelName)}${styledGauge}`
-				: `${styleModel(state.model.provider, modelName)}${styledGauge}`;
+			const styledFullRight = `${styleModel(state.model.provider, modelName)}${styledGauge}`;
 			styledRight = truncateToWidth(styledFullRight, visibleWidth(displayedRight), "");
 		}
 
