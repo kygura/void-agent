@@ -42,7 +42,6 @@ export * from "./types.js";
 // ============================================================================
 
 import { anthropicOAuthProvider } from "./anthropic.js";
-import { githubCopilotOAuthProvider } from "./github-copilot.js";
 import { antigravityOAuthProvider } from "./google-antigravity.js";
 import { geminiCliOAuthProvider } from "./google-gemini-cli.js";
 import { kimiCodingOAuthProvider } from "./kimi-coding.js";
@@ -54,7 +53,6 @@ const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
 	openaiCodexOAuthProvider,
 	geminiCliOAuthProvider,
 	antigravityOAuthProvider,
-	githubCopilotOAuthProvider,
 	kimiCodingOAuthProvider,
 ];
 
