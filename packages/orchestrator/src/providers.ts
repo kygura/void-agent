@@ -74,6 +74,9 @@ export class ConfiguredProvider implements ChildProvider {
 
 	private async refreshAuthState(signal?: AbortSignal): Promise<void> {
 		if (this.authAdapter === undefined) return;
+		// effectiveAuthMode() short-circuits on an explicitly pinned config.auth and never
+		// reads the cached/probed AuthInfo in that case, so skip the subprocess probe entirely.
+		if (this.config.auth === "subscription" || this.config.auth === "api") return;
 		if (this.authRefresh === undefined) {
 			const refresh = this.authAdapter
 				.status(signal)
