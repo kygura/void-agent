@@ -10,15 +10,19 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-/**
- * Detect if we're running as a Bun compiled binary.
- * Bun binaries have import.meta.url containing "$bunfs", "~BUN", or "%7EBUN" (Bun's virtual filesystem path)
- */
-export const isBunBinary =
-	import.meta.url.includes("$bunfs") || import.meta.url.includes("~BUN") || import.meta.url.includes("%7EBUN");
-
 /** Detect if Bun is the runtime (compiled binary or bun run) */
 export const isBunRuntime = !!process.versions.bun;
+
+/**
+ * Detect if we're running as a Bun compiled binary.
+ * Bun's bundler can evaluate `import.meta.url` before compilation, so also compare the runtime
+ * executable and argv values: compiled binaries run with a different executable than `argv[0]`.
+ */
+export const isBunBinary =
+	(isBunRuntime && process.execPath !== process.argv[0]) ||
+	import.meta.url.includes("$bunfs") ||
+	import.meta.url.includes("~BUN") ||
+	import.meta.url.includes("%7EBUN");
 
 // =============================================================================
 // Install Method Detection
