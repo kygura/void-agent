@@ -32,7 +32,6 @@ export function createOrchestrationExtension(
 		pi.on("session_start", async (_event, ctx) => {
 			uiSubscription?.unsubscribe();
 			const entries = ctx.sessionManager.getEntries();
-			const parentSessionId = ctx.sessionManager.getSessionId();
 			await host.attachParent(ctx.sessionManager.getSessionId(), {
 				childSessionIds: entries.flatMap((entry) =>
 					entry.type === "custom_message" &&
@@ -61,7 +60,6 @@ export function createOrchestrationExtension(
 				},
 				appendState: (state) => pi.appendEntry(VOID_SPAWN_STATE_CUSTOM_TYPE, state),
 			});
-			ctx.ui.setStatus("void:provider", `provider: ${host.defaultProvider(parentSessionId)}`);
 			uiSubscription = host.subscribe((event) => {
 				getOrchestrationUiController()?.requestRender();
 				if (
@@ -116,7 +114,6 @@ export function createOrchestrationExtension(
 					const committed = pendingProviders.get(parentId);
 					if (committed !== undefined) {
 						pendingProviders.delete(parentId);
-						ctx.ui.setStatus("void:provider", `provider: ${committed}`);
 						ctx.ui.notify(`provider → ${committed} · next run starts fresh`, "info");
 					}
 				});
@@ -159,7 +156,6 @@ export function createOrchestrationExtension(
 				await runCommand(ctx, () => {
 					host.selectProvider(ctx.sessionManager.getSessionId(), provider!, ctx.cwd);
 					pendingProviders.set(ctx.sessionManager.getSessionId(), provider!);
-					ctx.ui.setStatus("void:provider", `provider: ${provider} ⟳`);
 				});
 			},
 		});
