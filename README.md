@@ -4,6 +4,8 @@ void is a TypeScript monorepo for building and running AI agents. It includes a 
 
 void is a fork of [badlogic/pi-mono](https://github.com/badlogic/pi-mono), renamed and extended with headless child-agent orchestration (`@void/orchestrator`).
 
+![void startup and splash screen](docs/images/void-splash.gif)
+
 ## Quick start
 
 Requirements:
