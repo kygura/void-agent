@@ -2,6 +2,8 @@
 
 void is a TypeScript monorepo for building and running AI agents. It includes a terminal coding agent, a provider-neutral agent runtime, a multi-provider LLM API, terminal and web UI libraries, headless child-agent orchestration, and supporting tools for Slack automation and GPU-hosted LLM deployments.
 
+void is a fork of [badlogic/pi-mono](https://github.com/badlogic/pi-mono), renamed and extended with headless child-agent orchestration (`@void/orchestrator`).
+
 ## Quick start
 
 Requirements:
@@ -13,7 +15,7 @@ Install dependencies, build the coding agent, and run it:
 
 ```bash
 bun install --frozen-lockfile
-bun run start:build
+bun run build:start
 ```
 
 To run the built executable directly:
@@ -22,11 +24,25 @@ To run the built executable directly:
 ./packages/coding-agent/dist/void
 ```
 
-To make the executable available as `void` on your PATH:
+To build and make the executable available as `void` on your PATH:
 
 ```bash
-bun run install:global
+bun run build:global
 ```
+
+To build and link the executable into this project's local bin instead:
+
+```bash
+bun run build:local
+```
+
+For a one-shot response, use print mode:
+
+```bash
+void --print "Explain the files in this repository"
+```
+
+See the [`@void/coding-agent` README](packages/coding-agent/README.md) for provider setup, session management, extensions, skills, and the complete CLI reference.
 
 ## Packages
 
