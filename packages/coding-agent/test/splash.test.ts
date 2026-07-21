@@ -4,6 +4,9 @@ import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import {
 	FRAME_INTERVAL_MS,
 	fits,
+	getActiveSplashBandStyles,
+	getSplashPaletteNames,
+	getSplashPalettePreference,
 	MAX_HEIGHT,
 	MAX_WIDTH,
 	MIN_HEIGHT,
@@ -13,6 +16,7 @@ import {
 	resetSplashAnimation,
 	SplashAnimator,
 	SplashComponent,
+	setSplashPalette,
 	WORDMARK_ENTRANCE_MS,
 } from "../src/modes/interactive/components/splash.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
@@ -81,6 +85,34 @@ describe("startup splash", () => {
 		expect(second).not.toBe(first);
 	});
 
+	test("pins the splash palette by name and restores random", () => {
+		expect(getSplashPaletteNames()).toEqual([
+			"amber",
+			"green",
+			"blue",
+			"red",
+			"violet",
+			"cyan",
+			"pink",
+			"teal",
+			"gold",
+			"slate",
+		]);
+
+		setSplashPalette("blue");
+		expect(getSplashPalettePreference()).toBe("blue");
+		const blue = getActiveSplashBandStyles().map((style) => style("x"));
+
+		setSplashPalette("amber");
+		expect(getActiveSplashBandStyles().map((style) => style("x"))).not.toEqual(blue);
+
+		setSplashPalette("blue");
+		expect(getActiveSplashBandStyles().map((style) => style("x"))).toEqual(blue);
+
+		setSplashPalette("random");
+		expect(getSplashPalettePreference()).toBe("random");
+	});
+
 	test("animates wordmark halves from opposite sides deterministically", () => {
 		resetSplashAnimation();
 		const initial = stripAnsi(renderSplash(50, 18, FIXED_TIME)).split("\n")[1]!;
@@ -93,7 +125,7 @@ describe("startup splash", () => {
 		expect(replay).toBe(initial);
 	});
 
-	test("renders rotating faceted spheres within the art bounds", () => {
+	test("renders rotating faceted cubes within the art bounds", () => {
 		resetSplashAnimation();
 		const first = stripAnsi(renderSplash(60, 20, FIXED_TIME));
 		const later = stripAnsi(renderSplash(60, 20, FIXED_TIME + FRAME_INTERVAL_MS * 5));

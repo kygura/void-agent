@@ -63,19 +63,19 @@ export const KEYBINDINGS = {
 	"app.exit": { defaultKeys: "ctrl+d", description: "Exit when editor is empty" },
 	"app.suspend": { defaultKeys: "ctrl+z", description: "Suspend to background" },
 	"app.thinking.cycle": {
-		defaultKeys: "shift+tab",
+		defaultKeys: [],
 		description: "Cycle thinking level",
 	},
 	"app.thinking.stepDown": {
-		defaultKeys: ["shift+left", "ctrl+left"],
+		defaultKeys: "shift+left",
 		description: "Lower reasoning level",
 	},
 	"app.thinking.stepUp": {
-		defaultKeys: ["shift+right", "ctrl+right"],
+		defaultKeys: "shift+right",
 		description: "Raise reasoning level",
 	},
 	"app.model.cycleForward": {
-		defaultKeys: "ctrl+p",
+		defaultKeys: "shift+tab",
 		description: "Cycle to next model",
 	},
 	"app.model.cycleBackward": {
@@ -173,7 +173,7 @@ export const KEYBINDINGS = {
 		description: "Drop the newest child prompt",
 	},
 	"app.permissions.toggle": {
-		defaultKeys: [],
+		defaultKeys: "ctrl+p",
 		description: "Toggle approval prompts for mutating tools",
 	},
 } as const satisfies KeybindingDefinitions;

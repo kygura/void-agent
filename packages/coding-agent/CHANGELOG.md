@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed interactive permission prompts being unavailable when permission gating was disabled at startup; the toggle can now enable prompts from the default state.
 - Fixed bare `readline` import to use `node:readline` prefix for Deno compatibility ([#2885](https://github.com/badlogic/pi-mono/issues/2885) by [@milosv-vtool](https://github.com/milosv-vtool))
 - Fixed auto-retry to treat stream failures like `request ended without sending any chunks` as transient errors ([#2892](https://github.com/badlogic/pi-mono/issues/2892))
 
@@ -11,9 +12,11 @@
 
 - Added built-in Kimi For Coding OAuth authentication using Kimi's device authorization flow.
 - Added the built-in `void` child orchestration extension with Provider selection, concurrent spawn, resume, cancellation, model and effort controls, and the `/agents` view.
+- Added `/theme` to switch the color theme with live preview, and `/color` to pin the splash art palette (`amber`, `green`, `blue`, `red`, `violet`, or `random`). The palette choice persists in settings.
 
 ### Changed
 
+- Reassigned `Shift+Tab` from cycling thinking levels to toggling approval prompts for mutating tools. Thinking-level cycling remains available through custom keybindings.
 - Colored provider and model names in the interactive footer and configurable status line using the provider palette, with stronger styling for frontier models.
 
 ## [0.65.2] - 2026-04-06

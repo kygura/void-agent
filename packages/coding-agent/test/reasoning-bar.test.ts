@@ -32,25 +32,25 @@ beforeAll(() => {
 });
 
 describe("buildReasoningBar", () => {
-	it("fills one block per level up to and including the current one", () => {
+	it("fills one block per level up to and including the current one, off excluded", () => {
 		const line = buildReasoningBar(baseData({ thinkingLevel: "medium" }), 80);
-		expect(blocks(line)).toBe("████░░");
-		expect(stripAnsi(line)).toBe("████░░ medium");
+		expect(blocks(line)).toBe("███░░");
+		expect(stripAnsi(line)).toBe("███░░ medium");
 	});
 
 	it("leaves every block empty when thinking is off", () => {
 		const data = baseData({ thinkingLevel: "off" });
-		expect(blocks(buildReasoningBar(data, 80))).toBe("░░░░░░");
-		expect(stripAnsi(buildReasoningGauge(data, 80))).toBe("░░░░░░");
+		expect(blocks(buildReasoningBar(data, 80))).toBe("░░░░░");
+		expect(stripAnsi(buildReasoningGauge(data, 80))).toBe("░░░░░");
 	});
 
 	it("fills every block at the highest level", () => {
-		expect(blocks(buildReasoningBar(baseData({ thinkingLevel: "xhigh" }), 80))).toBe("██████");
+		expect(blocks(buildReasoningBar(baseData({ thinkingLevel: "xhigh" }), 80))).toBe("█████");
 	});
 
 	it("renders one block per available level when xhigh is unsupported", () => {
 		const data = baseData({ thinkingLevel: "high", availableLevels: LEVELS.slice(0, 5) });
-		expect(blocks(buildReasoningBar(data, 80))).toBe("█████");
+		expect(blocks(buildReasoningBar(data, 80))).toBe("████");
 	});
 
 	it("renders an unavailable marker when the model doesn't support thinking", () => {
@@ -61,7 +61,7 @@ describe("buildReasoningBar", () => {
 
 	it("drops the label and stays within narrow widths", () => {
 		const data = baseData({ thinkingLevel: "high" });
-		expect(stripAnsi(buildReasoningBar(data, 8))).toBe("█████░");
+		expect(stripAnsi(buildReasoningBar(data, 8))).toBe("████░");
 		for (const width of [0, 1, 3, 6, 8, 20]) {
 			expect(visibleWidth(buildReasoningBar(data, width))).toBeLessThanOrEqual(width);
 		}
@@ -69,13 +69,14 @@ describe("buildReasoningBar", () => {
 
 	it("renders a compact gauge without a duplicate level label", () => {
 		const line = buildReasoningGauge(baseData({ thinkingLevel: "medium" }), 80);
-		expect(stripAnsi(line)).toBe("████░░");
+		expect(stripAnsi(line)).toBe("███░░");
 		expect(line).not.toContain("medium");
 	});
 
-	it("always colors filled blocks from the active splash palette", () => {
+	it("colors filled blocks from the active splash palette, one band per fillable level", () => {
 		const line = buildReasoningGauge(baseData({ thinkingLevel: "xhigh" }), 80);
-		for (const style of getActiveSplashBandStyles()) {
+		const fillableLevelCount = LEVELS.length - 1; // excludes "off"
+		for (const style of getActiveSplashBandStyles().slice(0, fillableLevelCount)) {
 			expect(line).toContain(style("█"));
 		}
 	});
@@ -86,7 +87,7 @@ describe("ReasoningBarComponent", () => {
 		const component = new ReasoningBarComponent(() => baseData({ thinkingLevel: "low" }));
 		const lines = component.render(80);
 		expect(lines).toHaveLength(1);
-		expect(stripAnsi(lines[0]!)).toBe("███░░░ low");
+		expect(stripAnsi(lines[0]!)).toBe("██░░░ low");
 	});
 
 	it("renders nothing at zero width instead of a broken line", () => {

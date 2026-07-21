@@ -85,4 +85,11 @@ describe("keybindings migration", () => {
 		expect(effective["tui.select.confirm"]).toBe("enter");
 		expect(effective["app.interrupt"]).toBe("ctrl+x");
 	});
+
+	it("uses Shift+Tab to cycle models and Ctrl+P to toggle permission prompts", () => {
+		const effective = new KeybindingsManager().getEffectiveConfig();
+
+		expect(effective["app.model.cycleForward"]).toBe("shift+tab");
+		expect(effective["app.permissions.toggle"]).toBe("ctrl+p");
+	});
 });

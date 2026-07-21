@@ -17,6 +17,7 @@ import {
 } from "@void/ai";
 import { describe, expect, it, vi } from "vitest";
 import {
+	createPermissionGate,
 	isMutatingTool,
 	MUTATING_TOOL_NAMES,
 	type PermissionDecision,
@@ -249,6 +250,14 @@ describe("default configuration", () => {
 
 	it("defaults to disabled in settings", () => {
 		expect(inMemorySettings().getPermissionsEnabled()).toBe(false);
+	});
+
+	it("creates a disabled gate so the interactive toggle can enable it", () => {
+		const gate = createPermissionGate(inMemorySettings());
+
+		expect(gate.isEnabled()).toBe(false);
+		gate.setEnabled(true);
+		expect(gate.isEnabled()).toBe(true);
 	});
 });
 

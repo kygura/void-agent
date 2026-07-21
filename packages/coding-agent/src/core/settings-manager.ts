@@ -77,6 +77,7 @@ export interface Settings {
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
 	theme?: string;
+	splashPalette?: string; // Splash art palette name (see splash.ts); unset or "random" = random per splash
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
@@ -641,6 +642,16 @@ export class SettingsManager {
 	setTheme(theme: string): void {
 		this.globalSettings.theme = theme;
 		this.markModified("theme");
+		this.save();
+	}
+
+	getSplashPalette(): string | undefined {
+		return this.settings.splashPalette;
+	}
+
+	setSplashPalette(palette: string): void {
+		this.globalSettings.splashPalette = palette;
+		this.markModified("splashPalette");
 		this.save();
 	}
 

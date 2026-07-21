@@ -26,24 +26,24 @@ type AxisSpring = { angle: number; velocity: number; target: number };
 export type SplashBandStyle = (text: string) => string;
 
 type SplashPalette = {
+	name: string;
 	bands: Array<{ hex: string; bold?: boolean }>;
-	spheres: [string, string, string, string, string, string];
 };
 
 type CompiledSplashPalette = {
 	bands: SplashBandStyle[];
-	spheres: SplashBandStyle[];
-	combined: SplashBandStyle[];
 	header: SplashBandStyle;
 };
 
-// Curated splash palettes. Each is a coherent dark -> bright shading ramp:
-// bands map to the pyramid's six luminance levels, spheres to the background
-// orbiters. One palette is picked at random per splash (new/clear).
-// The amber ramp is the original Go void splash palette.
+// Curated splash palettes. Each is a coherent dark -> bright shading ramp
+// mapping to the pyramid's six luminance levels; this same ramp drives the
+// reasoning-level gauge (getActiveSplashBandStyles). One palette is picked at
+// random per splash (new/clear). The amber ramp is the original Go void
+// splash palette.
 const SPLASH_PALETTES: SplashPalette[] = [
 	{
 		// amber: ember -> rust -> soft red -> amber -> yellow -> pale highlight
+		name: "amber",
 		bands: [
 			{ hex: "#7A2E1C" },
 			{ hex: "#B23B24" },
@@ -52,10 +52,10 @@ const SPLASH_PALETTES: SplashPalette[] = [
 			{ hex: "#FFC247", bold: true },
 			{ hex: "#FFF0B2", bold: true },
 		],
-		spheres: ["#6B2D1F", "#A63D24", "#D45A2A", "#F07832", "#FFB454", "#FFE0A3"],
 	},
 	{
 		// green: moss -> leaf -> spring -> mint highlight
+		name: "green",
 		bands: [
 			{ hex: "#144A2C" },
 			{ hex: "#1D793F" },
@@ -64,10 +64,10 @@ const SPLASH_PALETTES: SplashPalette[] = [
 			{ hex: "#A4F5A2", bold: true },
 			{ hex: "#E1FFDB", bold: true },
 		],
-		spheres: ["#164A2A", "#19733A", "#20A950", "#55D66F", "#9AF29A", "#D9FFD0"],
 	},
 	{
 		// blue: midnight -> steel -> sky -> ice highlight
+		name: "blue",
 		bands: [
 			{ hex: "#162A66" },
 			{ hex: "#214C9A" },
@@ -76,10 +76,10 @@ const SPLASH_PALETTES: SplashPalette[] = [
 			{ hex: "#A6E2FF", bold: true },
 			{ hex: "#E4FAFF", bold: true },
 		],
-		spheres: ["#182E66", "#2456A5", "#2C82D4", "#51B8F5", "#98E0FF", "#D8F6FF"],
 	},
 	{
 		// red: maroon -> brick -> coral -> blush highlight
+		name: "red",
 		bands: [
 			{ hex: "#64152D" },
 			{ hex: "#9D1E3D" },
@@ -88,10 +88,10 @@ const SPLASH_PALETTES: SplashPalette[] = [
 			{ hex: "#FF9B9B", bold: true },
 			{ hex: "#FFD0D0", bold: true },
 		],
-		spheres: ["#64152D", "#9D1E3D", "#D32F52", "#F05B69", "#FF9B9B", "#FFD0D0"],
 	},
 	{
 		// violet: plum -> orchid -> lavender highlight
+		name: "violet",
 		bands: [
 			{ hex: "#35105F" },
 			{ hex: "#5D1FA0" },
@@ -100,21 +100,85 @@ const SPLASH_PALETTES: SplashPalette[] = [
 			{ hex: "#D5A1FF", bold: true },
 			{ hex: "#F1DDFF", bold: true },
 		],
-		spheres: ["#32145F", "#5A2194", "#8538C2", "#B45BEA", "#D6A1FF", "#F1DDFF"],
+	},
+	{
+		// cyan: deep teal -> cyan -> frosted aqua highlight
+		name: "cyan",
+		bands: [
+			{ hex: "#06495A" },
+			{ hex: "#08758A" },
+			{ hex: "#0BA3B5" },
+			{ hex: "#29D0D4" },
+			{ hex: "#86F0E8", bold: true },
+			{ hex: "#D5FFF5", bold: true },
+		],
+	},
+	{
+		// pink: wine -> fuchsia -> rosewater highlight
+		name: "pink",
+		bands: [
+			{ hex: "#591440" },
+			{ hex: "#8D1C63" },
+			{ hex: "#C42B88" },
+			{ hex: "#ED5CAE" },
+			{ hex: "#FFADD6", bold: true },
+			{ hex: "#FFE0EF", bold: true },
+		],
+	},
+	{
+		// teal: forest -> sea green -> seafoam highlight
+		name: "teal",
+		bands: [
+			{ hex: "#0C473F" },
+			{ hex: "#117264" },
+			{ hex: "#1BA58C" },
+			{ hex: "#4DD0AE" },
+			{ hex: "#9DE8C9", bold: true },
+			{ hex: "#D9FCEC", bold: true },
+		],
+	},
+	{
+		// gold: umber -> ochre -> sunlit cream highlight
+		name: "gold",
+		bands: [
+			{ hex: "#5A3B0B" },
+			{ hex: "#8A5B0A" },
+			{ hex: "#BD8614" },
+			{ hex: "#E9BC3E" },
+			{ hex: "#F8DD83", bold: true },
+			{ hex: "#FFF5C8", bold: true },
+		],
+	},
+	{
+		// slate: charcoal -> steel -> silver highlight
+		name: "slate",
+		bands: [
+			{ hex: "#263340" },
+			{ hex: "#405463" },
+			{ hex: "#617887" },
+			{ hex: "#91AAB7" },
+			{ hex: "#C6D8DF", bold: true },
+			{ hex: "#EDF7F8", bold: true },
+		],
 	},
 ];
 
+export const SPLASH_PALETTE_RANDOM = "random";
+
+// When set to a palette name, every splash uses it; "random"/unset keeps
+// the pick-per-splash behavior.
+let preferredPaletteName: string | undefined;
+
 function pickSplashPalette(): SplashPalette {
+	const preferred = SPLASH_PALETTES.find((palette) => palette.name === preferredPaletteName);
+	if (preferred) return preferred;
 	return SPLASH_PALETTES[Math.floor(Math.random() * SPLASH_PALETTES.length)] as SplashPalette;
 }
 
 function compileSplashPalette(palette: SplashPalette): CompiledSplashPalette {
 	const bands = palette.bands.map((band) => styleForHex(band.hex, band.bold));
-	const spheres = palette.spheres.map((hex) => styleForHex(hex));
 	return {
 		bands,
-		spheres,
-		combined: [...bands, ...spheres],
 		header: styleForHex(palette.bands[3]!.hex, true),
 	};
 }
@@ -125,6 +189,25 @@ let activeStyles = compileSplashPalette(activePalette);
 function selectSplashPalette(): void {
 	activePalette = pickSplashPalette();
 	activeStyles = compileSplashPalette(activePalette);
+}
+
+/** Names of the curated splash palettes, in declaration order. */
+export function getSplashPaletteNames(): string[] {
+	return SPLASH_PALETTES.map((palette) => palette.name);
+}
+
+/** The persisted palette preference ("random" when none is pinned). */
+export function getSplashPalettePreference(): string {
+	return preferredPaletteName ?? SPLASH_PALETTE_RANDOM;
+}
+
+/**
+ * Pin the splash palette by name, or restore random pick-per-splash with
+ * "random"/undefined. Takes effect immediately on the active splash.
+ */
+export function setSplashPalette(name: string | undefined): void {
+	preferredPaletteName = name === SPLASH_PALETTE_RANDOM ? undefined : name;
+	selectSplashPalette();
 }
 
 /** Return the six styles used by the currently active splash palette. */
@@ -163,55 +246,81 @@ const LOWER_BAND_GLYPHS = ["'", "-", "~", "+", "x", "&"];
 
 const LIGHT_DIRECTION = normalize({ x: -0.3, y: 0.7, z: 0.75 });
 
-const BACKGROUND_SPHERES = [
-	{ x: -2.9, y: 1.55, radius: 0.62, drift: 0.25, speed: 0.22, phase: 0.7 },
-	{ x: 3, y: -1.45, radius: 0.45, drift: 0.35, speed: -0.16, phase: 2.6 },
-	{ x: 2.7, y: 1.65, radius: 0.3, drift: 0.3, speed: 0.3, phase: 4.4 },
-];
+const BACKGROUND_CUBE_COUNT = 20;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+// Clearance around the crystal (x in [-1,1], y in [-1.3,1.3], and it tumbles
+// freely in 3D so its screen footprint can swing wider) so background cubes
+// never touch it. Fixed in local units, same as the crystal's own geometry -
+// unlike the outer field edge below, this does not depend on terminal size.
+const PYRAMID_CLEAR_X = 1.8;
+const PYRAMID_CLEAR_Y = 2.0;
 
-const SPHERE_BAND_GLYPHS = ["·", ".", ":", "o", "O", "0"];
+type BackgroundCubeSeed = { angle: number; t: number; radius: number; drift: number; speed: number; phase: number };
+
+// Sunflower-seed spiral (evenly covers a disc, unlike naive random scatter
+// which clumps for a count this low), storing only angle + radial fraction
+// `t` (0 = hugging the pyramid clearance, 1 = the canvas edge). The actual
+// (x, y) is resolved per-render against that frame's box size, so the field
+// always reaches the full available width/height instead of a fixed disc.
+function createBackgroundCubeSeeds(): BackgroundCubeSeed[] {
+	return Array.from({ length: BACKGROUND_CUBE_COUNT }, (_, index) => {
+		const direction = index % 2 === 0 ? 1 : -1;
+		return {
+			angle: index * GOLDEN_ANGLE,
+			t: Math.sqrt((index + 0.5) / BACKGROUND_CUBE_COUNT),
+			radius: 0.14 + Math.random() * 0.12,
+			drift: 0.06 + Math.random() * 0.08,
+			speed: direction * (0.3 + Math.random() * 0.35),
+			phase: Math.random() * Math.PI * 2,
+		};
+	});
+}
+
+const BACKGROUND_CUBE_SEEDS = createBackgroundCubeSeeds();
+
+function ellipseRadiusAt(angle: number, semiX: number, semiY: number): number {
+	const cos = Math.cos(angle);
+	const sin = Math.sin(angle);
+	return 1 / Math.sqrt((cos / semiX) ** 2 + (sin / semiY) ** 2);
+}
+
+const CUBE_BAND_GLYPHS = ["·", ".", ":", "o", "O", "0"];
 
 type Triangle = [number, number, number];
 
-function createSphereMesh(): { vertices: Vec3[]; faces: Triangle[] } {
-	const vertices: Vec3[] = [{ x: 0, y: 1, z: 0 }];
-	const faces: Triangle[] = [];
-	const sides = 8;
-	const rings = 3;
-
-	for (let ring = 1; ring <= rings; ring++) {
-		const latitude = (ring * Math.PI) / (rings + 1);
-		for (let side = 0; side < sides; side++) {
-			const longitude = (side * Math.PI * 2) / sides;
-			vertices.push({
-				x: Math.sin(latitude) * Math.cos(longitude),
-				y: Math.cos(latitude),
-				z: Math.sin(latitude) * Math.sin(longitude),
-			});
-		}
-	}
-
-	const bottom = vertices.length;
-	vertices.push({ x: 0, y: -1, z: 0 });
-	for (let side = 0; side < sides; side++) {
-		const next = (side + 1) % sides;
-		faces.push([0, 1 + side, 1 + next]);
-		const lowerRing = 1 + (rings - 1) * sides;
-		faces.push([bottom, lowerRing + next, lowerRing + side]);
-	}
-	for (let ring = 0; ring < rings - 1; ring++) {
-		const current = 1 + ring * sides;
-		const nextRing = current + sides;
-		for (let side = 0; side < sides; side++) {
-			const next = (side + 1) % sides;
-			faces.push([current + side, nextRing + side, current + next]);
-			faces.push([current + next, nextRing + side, nextRing + next]);
-		}
-	}
+function createCubeMesh(): { vertices: Vec3[]; faces: Triangle[] } {
+	// Corners normalized to unit circumradius so `radius` means the same
+	// thing here as it did for the sphere mesh it replaced.
+	const corner = 1 / Math.sqrt(3);
+	const signs: Array<[number, number, number]> = [
+		[-1, -1, -1],
+		[1, -1, -1],
+		[1, 1, -1],
+		[-1, 1, -1],
+		[-1, -1, 1],
+		[1, -1, 1],
+		[1, 1, 1],
+		[-1, 1, 1],
+	];
+	const vertices: Vec3[] = signs.map(([x, y, z]) => ({ x: x * corner, y: y * corner, z: z * corner }));
+	const faces: Triangle[] = [
+		[0, 1, 2],
+		[0, 2, 3], // front
+		[5, 4, 7],
+		[5, 7, 6], // back
+		[4, 0, 3],
+		[4, 3, 7], // left
+		[1, 5, 6],
+		[1, 6, 2], // right
+		[3, 2, 6],
+		[3, 6, 7], // top
+		[4, 5, 1],
+		[4, 1, 0], // bottom
+	];
 	return { vertices, faces };
 }
 
-const SPHERE_MESH = createSphereMesh();
+const CUBE_MESH = createCubeMesh();
 
 function randomTarget(from: number): number {
 	let delta = Math.PI / 2 + (Math.random() * (Math.PI * 3)) / 2;
@@ -354,7 +463,7 @@ function shade(a: Vec3, b: Vec3, c: Vec3, origin: Vec3 = { x: 0, y: 0, z: 0 }): 
 	return 5;
 }
 
-function drawFacetedSphere(
+function drawFacetedCube(
 	center: Vec3,
 	radius: number,
 	angles: readonly [number, number, number],
@@ -363,12 +472,11 @@ function drawFacetedSphere(
 	scale: number,
 	width: number,
 	height: number,
-	styleBase: number,
 	glyphs: string[],
 	styles: number[],
 	depth: number[],
 ): void {
-	const vertices = SPHERE_MESH.vertices.map((vertex) => {
+	const vertices = CUBE_MESH.vertices.map((vertex) => {
 		const rotated = rotateZ(rotateY(rotateX(vertex, angles[0]), angles[1]), angles[2]);
 		return {
 			x: center.x + rotated.x * radius,
@@ -377,7 +485,7 @@ function drawFacetedSphere(
 		};
 	});
 
-	for (const face of SPHERE_MESH.faces) {
+	for (const face of CUBE_MESH.faces) {
 		const a = vertices[face[0]]!;
 		const b = vertices[face[1]]!;
 		const c = vertices[face[2]]!;
@@ -391,11 +499,10 @@ function drawFacetedSphere(
 			shade(a, b, c, center),
 			width,
 			height,
-			SPHERE_BAND_GLYPHS,
+			CUBE_BAND_GLYPHS,
 			glyphs,
 			styles,
 			depth,
-			styleBase,
 		);
 	}
 }
@@ -414,7 +521,6 @@ function rasterize(
 	glyphs: string[],
 	styles: number[],
 	depth: number[],
-	styleOffset = 0,
 ): void {
 	const area = edge(p0, p1, p2);
 	if (area === 0) return;
@@ -433,7 +539,7 @@ function rasterize(
 			const cellDepth = weight0 * z0 + weight1 * z1 + weight2 * z2;
 			if (cellDepth <= depth[cell]) continue;
 			depth[cell] = cellDepth;
-			styles[cell] = styleOffset + shadeIndex;
+			styles[cell] = shadeIndex;
 			glyphs[cell] = bandGlyphs[shadeIndex];
 		}
 	}
@@ -524,30 +630,40 @@ export function renderSplash(
 	const glyphs = Array<string>(boxWidth * boxHeight).fill(" ");
 	const styles = Array<number>(boxWidth * boxHeight).fill(0);
 	const depth = Array<number>(boxWidth * boxHeight).fill(Number.NEGATIVE_INFINITY);
-	const { bands: palette, combined: combinedPalette } = activeStyles;
+	const { bands: palette } = activeStyles;
+
+	// Local x reaches twice as far per pixel as y (see project()), so these
+	// are the local-unit distances that land exactly on the box's edges for
+	// *this* render's actual size.
+	const cubeFieldEdgeX = boxWidth / 2 / (scale * 2);
+	const cubeFieldEdgeY = boxHeight / 2 / scale;
 
 	const seconds = now / 1000;
-	for (const sphere of BACKGROUND_SPHERES) {
-		const theta = sphere.phase + seconds * sphere.speed;
+	for (const seed of BACKGROUND_CUBE_SEEDS) {
+		const innerR = ellipseRadiusAt(seed.angle, PYRAMID_CLEAR_X, PYRAMID_CLEAR_Y);
+		const outerR = ellipseRadiusAt(seed.angle, cubeFieldEdgeX, cubeFieldEdgeY);
+		const anchorR = innerR + seed.t * (outerR - innerR);
+		const anchorX = Math.cos(seed.angle) * anchorR;
+		const anchorY = Math.sin(seed.angle) * anchorR;
+		const theta = seed.phase + seconds * seed.speed;
 		const angles: [number, number, number] = [
-			seconds * sphere.speed * 1.17 + sphere.phase,
-			seconds * sphere.speed * 0.83 - sphere.phase,
-			seconds * sphere.speed * 0.61 + sphere.phase * 0.5,
+			seconds * seed.speed * 1.17 + seed.phase,
+			seconds * seed.speed * 0.83 - seed.phase,
+			seconds * seed.speed * 0.61 + seed.phase * 0.5,
 		];
-		drawFacetedSphere(
+		drawFacetedCube(
 			{
-				x: sphere.x + sphere.drift * Math.cos(theta),
-				y: sphere.y + sphere.drift * Math.sin(theta),
+				x: anchorX + seed.drift * Math.cos(theta),
+				y: anchorY + seed.drift * Math.sin(theta),
 				z: 0,
 			},
-			sphere.radius,
+			seed.radius,
 			angles,
 			centerX,
 			centerY,
 			scale,
 			boxWidth,
 			boxHeight,
-			palette.length,
 			glyphs,
 			styles,
 			depth,
@@ -580,9 +696,7 @@ export function renderSplash(
 	const lines: string[] = [];
 	for (let row = 0; row < boxHeight; row++) {
 		const start = row * boxWidth;
-		lines.push(
-			styleLine(glyphs.slice(start, start + boxWidth), styles.slice(start, start + boxWidth), combinedPalette),
-		);
+		lines.push(styleLine(glyphs.slice(start, start + boxWidth), styles.slice(start, start + boxWidth), palette));
 	}
 
 	// Wordmark halves enter laterally from opposite sides, then receive a

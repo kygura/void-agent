@@ -94,13 +94,15 @@ import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { PermissionPromptComponent } from "./components/permission-prompt.js";
-import { stepThinkingLevel } from "./components/reasoning-bar.js";
+import { getThinkingLevelBandStyle, stepThinkingLevel } from "./components/reasoning-bar.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { isSidebarVisible, Sidebar, SidebarLayout } from "./components/sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
-import { SplashComponent } from "./components/splash.js";
+import { getSplashPalettePreference, SplashComponent, setSplashPalette } from "./components/splash.js";
+import { SplashPaletteSelectorComponent } from "./components/splash-palette-selector.js";
+import { ThemeSelectorComponent } from "./components/theme-selector.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
@@ -326,6 +328,7 @@ export class InteractiveMode {
 		// Register themes from resource loader and initialize
 		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
 		initTheme(this.settingsManager.getTheme(), true);
+		setSplashPalette(this.settingsManager.getSplashPalette());
 	}
 
 	private getAutocompleteSourceTag(sourceInfo?: SourceInfo): string | undefined {
@@ -516,7 +519,7 @@ export class InteractiveMode {
 				hint("app.exit", "to exit (empty)"),
 				hint("app.suspend", "to suspend"),
 				keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
-				hint("app.thinking.cycle", "to cycle thinking level"),
+				hint("app.permissions.toggle", "to toggle permission prompts"),
 				rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
 				hint("app.model.select", "to select model"),
 				hint("app.tools.expand", "to expand tools"),
@@ -2161,6 +2164,16 @@ export class InteractiveMode {
 				await this.showModelsSelector();
 				return;
 			}
+			if (text === "/theme") {
+				this.editor.setText("");
+				this.showThemeSelector();
+				return;
+			}
+			if (text === "/color") {
+				this.editor.setText("");
+				this.showSplashPaletteSelector();
+				return;
+			}
 			if (text === "/model" || text.startsWith("/model ")) {
 				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
 				this.editor.setText("");
@@ -3239,7 +3252,7 @@ export class InteractiveMode {
 			this.editor.borderColor = theme.getBashModeBorderColor();
 		} else {
 			const level = this.session.thinkingLevel || "off";
-			this.editor.borderColor = theme.getThinkingBorderColor(level);
+			this.editor.borderColor = getThinkingLevelBandStyle(level, this.session.getAvailableThinkingLevels());
 		}
 		this.ui.requestRender();
 	}
@@ -3653,6 +3666,64 @@ export class InteractiveMode {
 		this.editorContainer.addChild(component);
 		this.ui.setFocus(focus);
 		this.ui.requestRender();
+	}
+
+	private showThemeSelector(): void {
+		const originalTheme = this.settingsManager.getTheme() || "dark";
+		this.showSelector((done) => {
+			const selector = new ThemeSelectorComponent(
+				originalTheme,
+				(themeName) => {
+					const result = setTheme(themeName, true);
+					this.settingsManager.setTheme(themeName);
+					this.ui.invalidate();
+					if (!result.success) {
+						this.showError(`Failed to load theme "${themeName}": ${result.error}\nFell back to dark theme.`);
+					}
+					done();
+					this.ui.requestRender();
+				},
+				() => {
+					setTheme(originalTheme, true);
+					this.ui.invalidate();
+					done();
+					this.ui.requestRender();
+				},
+				(themeName) => {
+					const result = setTheme(themeName, true);
+					if (result.success) {
+						this.ui.invalidate();
+						this.ui.requestRender();
+					}
+				},
+			);
+			return { component: selector, focus: selector.getSelectList() };
+		});
+	}
+
+	private showSplashPaletteSelector(): void {
+		const originalPalette = getSplashPalettePreference();
+		this.showSelector((done) => {
+			const selector = new SplashPaletteSelectorComponent(
+				originalPalette,
+				(paletteName) => {
+					setSplashPalette(paletteName);
+					this.settingsManager.setSplashPalette(paletteName);
+					done();
+					this.ui.requestRender();
+				},
+				() => {
+					setSplashPalette(originalPalette);
+					done();
+					this.ui.requestRender();
+				},
+				(paletteName) => {
+					setSplashPalette(paletteName);
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector.getSelectList() };
+		});
 	}
 
 	private showSettingsSelector(): void {

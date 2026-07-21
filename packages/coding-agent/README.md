@@ -155,8 +155,10 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 |---------|-------------|
 | `/login`, `/logout` | OAuth authentication |
 | `/model` | Switch models |
-| `/scoped-models` | Enable/disable models for Ctrl+P cycling |
+| `/scoped-models` | Enable/disable models for Shift+Tab cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
+| `/theme` | Switch color theme with live preview |
+| `/color` | Switch splash art color palette (or `random`) |
 | `/resume` | Pick from previous sessions |
 | `/new`, `/clear` | Start a new session |
 | `/name <name>` | Set session display name |
@@ -185,8 +187,8 @@ See `/hotkeys` for the full list. Customize via `~/.void/keybindings.json`. See 
 | Escape | Cancel/abort |
 | Escape twice | Open `/tree` |
 | Ctrl+L | Open model selector |
-| Ctrl+P / Shift+Ctrl+P | Cycle scoped models forward/backward |
-| Shift+Tab | Cycle thinking level |
+| Shift+Tab / Shift+Ctrl+P | Cycle scoped models forward/backward |
+| Ctrl+P | Toggle approval prompts for mutating tools |
 | Ctrl+O | Collapse/expand tool output |
 | Ctrl+T | Collapse/expand thinking blocks |
 
@@ -565,7 +567,7 @@ cat README.md | void -p "Summarize this text"
 | `--model <pattern>` | Model pattern or ID (supports `provider/id` and optional `:<thinking>`) |
 | `--api-key <key>` | API key (overrides env vars) |
 | `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `--models <patterns>` | Comma-separated patterns for Ctrl+P cycling |
+| `--models <patterns>` | Comma-separated patterns for Shift+Tab cycling |
 | `--list-models [search]` | List available models |
 
 ### Session Options

@@ -30,7 +30,7 @@ import type { ModelRegistry } from "./core/model-registry.js";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.js";
 import { ProcessLifetimeOrchestrationHost } from "./core/orchestration/index.js";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.js";
-import { PermissionGate } from "./core/permissions.js";
+import { createPermissionGate, type PermissionGate } from "./core/permissions.js";
 import type { CreateAgentSessionOptions } from "./core/sdk.js";
 import {
 	formatMissingSessionCwdPrompt,
@@ -529,8 +529,8 @@ export async function main(args: string[]) {
 	 * with in-process subagent children so their requests reach this process's prompt queue.
 	 *
 	 * Interactive mode only: it is the only mode with a human to answer the prompt. Print and RPC
-	 * mode keep today's auto-approve behavior. Created only when the setting is on, so an
-	 * untouched config allocates nothing and behaves exactly as before.
+	 * mode keep today's auto-approve behavior. The gate is created for every interactive session,
+	 * including when disabled, so the permission toggle can enable it from the default state.
 	 */
 	let permissionGate: PermissionGate | undefined;
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
@@ -597,13 +597,12 @@ export async function main(args: string[]) {
 			}
 		}
 
-		if (appMode === "interactive" && !permissionGate && services.settingsManager.getPermissionsEnabled()) {
-			const permissionSettings = services.settingsManager;
-			permissionGate = new PermissionGate({
-				enabled: true,
-				alwaysAllow: permissionSettings.getPermissionsAlwaysAllow(),
-				onAlwaysAllow: (toolName) => permissionSettings.addPermissionsAlwaysAllow(toolName),
-			});
+		if (appMode === "interactive") {
+			if (!permissionGate) {
+				permissionGate = createPermissionGate(services.settingsManager);
+			} else {
+				permissionGate.setEnabled(services.settingsManager.getPermissionsEnabled());
+			}
 		}
 
 		const created = await createAgentSessionFromServices({

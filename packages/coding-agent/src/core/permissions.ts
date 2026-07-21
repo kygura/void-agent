@@ -193,3 +193,23 @@ export class PermissionGate {
 		});
 	}
 }
+
+/** The subset of `SettingsManager` a freshly-constructed gate needs to be wired up. */
+export interface PermissionGateSettingsSource {
+	getPermissionsEnabled(): boolean;
+	getPermissionsAlwaysAllow(): string[];
+	addPermissionsAlwaysAllow(toolName: string): void;
+}
+
+/**
+ * Build a `PermissionGate` wired to `settings`, the same way for every call site
+ * (session startup in main.ts, and turning gating on mid-session from the toggle keybinding).
+ * Callers still need to attach an approver before the gate is usable.
+ */
+export function createPermissionGate(settings: PermissionGateSettingsSource): PermissionGate {
+	return new PermissionGate({
+		enabled: settings.getPermissionsEnabled(),
+		alwaysAllow: settings.getPermissionsAlwaysAllow(),
+		onAlwaysAllow: (toolName) => settings.addPermissionsAlwaysAllow(toolName),
+	});
+}

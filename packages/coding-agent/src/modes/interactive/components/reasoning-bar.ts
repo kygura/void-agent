@@ -29,15 +29,30 @@ export function stepThinkingLevel(
 	return availableLevels[next];
 }
 
+/** "off" isn't a fillable step, only the levels above it are. */
+function fillableLevels(availableLevels: ThinkingLevel[]): ThinkingLevel[] {
+	return availableLevels.filter((level) => level !== "off");
+}
+
 function buildReasoningBlocks(data: ReasoningBarData): string {
-	const currentIndex = Math.max(0, data.availableLevels.indexOf(data.thinkingLevel));
-	const filledThrough = data.thinkingLevel === "off" ? -1 : currentIndex;
+	const levels = fillableLevels(data.availableLevels);
+	const filledThrough = levels.indexOf(data.thinkingLevel);
 	const splashBands = getActiveSplashBandStyles();
-	return data.availableLevels
+	return levels
 		.map((_level, index) =>
 			index > filledThrough ? theme.fg("dim", EMPTY_BLOCK) : splashBands[index]!(FILLED_BLOCK),
 		)
 		.join("");
+}
+
+/** Splash-band style for a thinking level, matching the color the reasoning gauge fills up to. */
+export function getThinkingLevelBandStyle(
+	level: ThinkingLevel,
+	availableLevels: ThinkingLevel[],
+): (str: string) => string {
+	const splashBands = getActiveSplashBandStyles();
+	const index = Math.max(0, fillableLevels(availableLevels).indexOf(level));
+	return splashBands[index] ?? ((str: string) => theme.fg("dim", str));
 }
 
 /** Build the compact colored reasoning gauge without a duplicate level label. */
@@ -57,9 +72,9 @@ export function buildReasoningBar(data: ReasoningBarData, width: number): string
 	const blocks = buildReasoningBlocks(data);
 
 	// Plain-width budget: blocks + " " + level name. Drop the label first on narrow terminals.
-	const currentIndex = Math.max(0, data.availableLevels.indexOf(data.thinkingLevel));
-	const label = data.availableLevels[currentIndex] ?? data.thinkingLevel;
-	if (data.availableLevels.length + 1 + label.length > width) {
+	const label = data.thinkingLevel;
+	const blockCount = fillableLevels(data.availableLevels).length;
+	if (blockCount + 1 + label.length > width) {
 		return truncateToWidth(blocks, width, "");
 	}
 	return `${blocks} ${theme.fg("dim", label)}`;

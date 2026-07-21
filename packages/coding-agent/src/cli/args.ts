@@ -241,7 +241,7 @@ ${chalk.bold("Options:")}
   --fork <path>                  Fork specific session file or partial UUID into a new session
   --session-dir <dir>            Directory for session storage and lookup
   --no-session                   Don't save session (ephemeral)
-  --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
+  --models <patterns>            Comma-separated model patterns for Shift+Tab cycling
                                  Supports globs (anthropic/*, *sonnet*) and fuzzy matching
   --no-tools                     Disable all built-in tools
   --tools <tools>                Comma-separated list of tools to enable (default: read,bash,edit,write)
