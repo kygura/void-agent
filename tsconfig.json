@@ -10,6 +10,7 @@
 			"@void/ai/dist/*": ["./packages/ai/src/*"],
 			"@void/agent": ["./packages/agent/src/index.ts"],
 			"@void/agent/*": ["./packages/agent/src/*"],
+			"@void/jev": ["./packages/jev/src/index.ts"],
 			"@void/coding-agent": ["./packages/coding-agent/src/index.ts"],
 			"@void/coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
 			"@void/coding-agent/*": ["./packages/coding-agent/src/*"],

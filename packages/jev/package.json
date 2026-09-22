@@ -1,0 +1,35 @@
+{
+	"name": "@void/jev",
+	"version": "0.65.2",
+	"description": "Typed client for TypeSafe's Jev System One model: calibrated Noul/Choice/Score judgements for agent control flow",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json",
+		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
+		"test": "vitest --run",
+		"prepublishOnly": "bun run clean && bun run build"
+	},
+	"keywords": [
+		"ai",
+		"agent",
+		"jev",
+		"typesafe",
+		"classification"
+	],
+	"license": "MIT",
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"devDependencies": {
+		"@types/node": "^24.3.0",
+		"typescript": "^5.7.3",
+		"vitest": "^3.2.4"
+	}
+}
