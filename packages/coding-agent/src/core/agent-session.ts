@@ -464,11 +464,28 @@ export class AgentSession {
 				args: (args ?? {}) as Record<string, unknown>,
 				cwd: this._cwd,
 				origin: this._permissionOrigin,
+				intent: gate.hasJudge() ? this._latestUserText() : undefined,
 			},
 			signal,
 		);
 
 		return result.allowed ? undefined : { block: true, reason: result.reason };
+	}
+
+	/** Text of the most recent user message, for judging tool calls against what was asked. */
+	private _latestUserText(): string | undefined {
+		const messages = this.agent.state.messages;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (message.role !== "user") continue;
+			if (typeof message.content === "string") return message.content;
+			const text = message.content
+				.filter((part) => part.type === "text")
+				.map((part) => part.text)
+				.join("\n");
+			return text || undefined;
+		}
+		return undefined;
 	}
 
 	/** Permission gate for this session, when gating is configured. */

@@ -250,6 +250,31 @@ Object form filters which resources to load:
 
 See [packages.md](packages.md) for package management details.
 
+### Permissions
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `permissions.enabled` | boolean | `false` | Prompt before mutating tool calls (`edit`, `write`, `bash`, `subagent`, `subagent_send`). Toggle with `Shift+Tab` |
+| `permissions.alwaysAllow` | string[] | `[]` | Tool names approved with "always allow" |
+| `permissions.judge.enabled` | boolean | `false` | Screen gated calls with TypeSafe's Jev before prompting. Requires `TYPESAFE_API_KEY` |
+| `permissions.judge.model` | string | `"jev-latest"` | Jev model. Pin a versioned id such as `"jev-1.13.0"` once thresholds are tuned |
+| `permissions.judge.timeoutMs` | number | `5000` | Request timeout. On timeout the call falls through to the prompt |
+| `permissions.judge.allowConfidence` | number | `0.9` | Verdict confidence needed to run a call without prompting |
+| `permissions.judge.rejectConfidence` | number | `0.8` | Verdict confidence needed to block a call without prompting |
+
+With the judge enabled, Jev checks each gated call against your latest request in one request of about 15 ms. A routine call it's confident about runs without a prompt. A call it confidently judges dangerous (irreversible data loss, leaked secrets, off-task) is blocked, and the model is told why. Everything else, including a failed or timed-out Jev request, goes to the normal prompt. An error never turns into an allow.
+
+In print and RPC mode there is no human to prompt. There, `permissions.enabled` with a judge keeps gating on, so confident calls run and everything else is denied. Without a judge, those modes auto-approve.
+
+```json
+{
+  "permissions": {
+    "enabled": true,
+    "judge": { "enabled": true, "model": "jev-1.13.0" }
+  }
+}
+```
+
 ### Child orchestration
 
 Child Provider configuration is an optional `orchestrator` object in `settings.json`. The same schema is accepted in global and project settings; project values override global values through the normal nested settings merge.

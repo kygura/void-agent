@@ -3292,6 +3292,12 @@ export class InteractiveMode {
 	 */
 	private attachPermissionApprover(): void {
 		this.session.permissionGate?.setApprover((request, signal) => this.promptForPermission(request, signal));
+		// Automated decisions skip the prompt, so surface them; "ask" is visible as the prompt itself.
+		this.session.permissionGate?.onJudgement((request, judgement) => {
+			if (judgement.decision === "ask") return;
+			const verb = judgement.decision === "allow" ? "allowed" : "blocked";
+			this.showStatus(`Judge ${verb} ${request.toolName}: ${judgement.reason}`);
+		});
 	}
 
 	/**

@@ -49,6 +49,20 @@ export interface MarkdownSettings {
 export interface PermissionSettings {
 	enabled?: boolean; // default: false - when true, mutating tool calls prompt for approval before running
 	alwaysAllow?: string[]; // Tool names approved via "always allow"
+	judge?: PermissionJudgeSettings; // default: off - Jev pre-screens gated calls before the human prompt
+}
+
+/**
+ * Jev ("auto mode") pre-screen for gated tool calls. Requires `permissions.enabled` and
+ * `TYPESAFE_API_KEY`. Confident routine calls run unprompted, confident dangerous ones are
+ * blocked, everything else reaches the normal prompt (or is denied when no human is present).
+ */
+export interface PermissionJudgeSettings {
+	enabled?: boolean; // default: false
+	model?: string; // default: "jev-latest". Pin a versioned id (e.g. "jev-1.13.0") once thresholds are tuned
+	timeoutMs?: number; // default: 5000. On timeout the call falls through to the prompt
+	allowConfidence?: number; // default: 0.9. Verdict confidence required to run unprompted
+	rejectConfidence?: number; // default: 0.8. Verdict confidence required to block unprompted
 }
 
 export type TransportSetting = Transport;
@@ -1066,6 +1080,12 @@ export class SettingsManager {
 		this.globalSettings.permissions.alwaysAllow = [...current, toolName];
 		this.markModified("permissions", "alwaysAllow");
 		this.save();
+	}
+
+	/** Jev pre-screen settings, or undefined when not enabled. */
+	getPermissionsJudge(): PermissionJudgeSettings | undefined {
+		const judge = this.settings.permissions?.judge;
+		return judge?.enabled ? { ...judge } : undefined;
 	}
 
 	clearPermissionsAlwaysAllow(): void {

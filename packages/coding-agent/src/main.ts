@@ -24,6 +24,7 @@ import {
 } from "./core/agent-session-services.js";
 import { AuthStorage } from "./core/auth-storage.js";
 import { exportFromFile } from "./core/export-html/index.js";
+import { createJevPermissionJudge } from "./core/jev-judge.js";
 import { KeybindingsManager } from "./core/keybindings.js";
 import { buildConfigOverrides } from "./core/merge-config.js";
 import type { ModelRegistry } from "./core/model-registry.js";
@@ -597,12 +598,24 @@ export async function main(args: string[]) {
 			}
 		}
 
-		if (appMode === "interactive") {
+		// A configured judge also gates headless modes: with no human to ask, the judge's "ask"
+		// denies, so print/RPC runs get auto mode instead of unconditional auto-approve.
+		const judgeSettings = services.settingsManager.getPermissionsJudge();
+		const headlessJudged =
+			appMode !== "interactive" && !!judgeSettings && services.settingsManager.getPermissionsEnabled();
+		if (appMode === "interactive" || headlessJudged) {
 			if (!permissionGate) {
 				permissionGate = createPermissionGate(services.settingsManager);
 			} else {
 				permissionGate.setEnabled(services.settingsManager.getPermissionsEnabled());
 			}
+		}
+		if (permissionGate) {
+			const setup = judgeSettings ? createJevPermissionJudge(judgeSettings) : undefined;
+			if (setup && "error" in setup) {
+				diagnostics.push({ type: "warning", message: setup.error });
+			}
+			permissionGate.setJudge(setup && "judge" in setup ? setup.judge : undefined);
 		}
 
 		const created = await createAgentSessionFromServices({
@@ -667,9 +680,12 @@ export async function main(args: string[]) {
 		stdinContent = await readPipedStdin();
 		if (stdinContent !== undefined && appMode === "interactive") {
 			appMode = "print";
-			// Piped stdin demotes this run to print mode, which has no prompt UI. Disable the gate
-			// rather than leave it enabled with no approver, which would deny every mutating call.
-			permissionGate?.setEnabled(false);
+			// Piped stdin demotes this run to print mode, which has no prompt UI. Without a judge,
+			// disable the gate rather than leave it enabled with no approver, which would deny every
+			// mutating call. With a judge, keep it: confident calls still run, the rest are denied.
+			if (!permissionGate?.hasJudge()) {
+				permissionGate?.setEnabled(false);
+			}
 		}
 	}
 	time("readPipedStdin");

@@ -39,7 +39,31 @@ export interface PermissionRequest {
 	 * agent name when a subagent's request is escalated to the parent's queue.
 	 */
 	origin?: string;
+	/** Text of the user's latest request, so a judge can weigh the call against intent. */
+	intent?: string;
 }
+
+/**
+ * Automated pre-screen that runs before the human approver.
+ *
+ * - `allow`: run without prompting.
+ * - `reject`: block without prompting; `reason` is shown to the model.
+ * - `ask`: no automated decision; fall through to the human approver.
+ *
+ * A judge that throws is treated as `ask`: losing the judge degrades to today's prompt, never to
+ * auto-approve.
+ */
+export interface PermissionJudgement {
+	decision: "allow" | "ask" | "reject";
+	reason: string;
+	/** Short label for the source of the judgement, e.g. the model id that answered. */
+	source?: string;
+}
+
+export type PermissionJudge = (request: PermissionRequest, signal?: AbortSignal) => Promise<PermissionJudgement>;
+
+/** Observer for automated judgements, for status lines and audit logs. */
+export type PermissionJudgementListener = (request: PermissionRequest, judgement: PermissionJudgement) => void;
 
 /**
  * - `allow`: run this call only.
@@ -65,6 +89,8 @@ export interface PermissionCheckResult {
 	reason?: string;
 }
 
+const JUDGE_REJECT_PREFIX = "Blocked by the automated safety judge: ";
+const JUDGE_REJECT_SUFFIX = "Do not retry this call or work around it; explain to the user what you wanted to do.";
 const DENY_REASON = "Denied by user. Do not retry this call; ask the user how to proceed.";
 const CANCEL_REASON = "Turn cancelled by user.";
 const NO_APPROVER_REASON =
@@ -80,6 +106,8 @@ export class PermissionGate {
 	private readonly alwaysAllow: Set<string>;
 	private readonly onAlwaysAllow?: (toolName: string) => void;
 	private approver?: PermissionApprover;
+	private judge?: PermissionJudge;
+	private judgementListener?: PermissionJudgementListener;
 	/** Serializes prompts so a parallel batch queues instead of racing the UI. */
 	private queue: Promise<unknown> = Promise.resolve();
 
@@ -106,6 +134,22 @@ export class PermissionGate {
 		return this.approver !== undefined;
 	}
 
+	/**
+	 * Attach an automated judge that screens calls before the approver sees them. With a judge
+	 * and no approver, `ask` still denies, which makes headless runs safe to leave gated.
+	 */
+	setJudge(judge: PermissionJudge | undefined): void {
+		this.judge = judge;
+	}
+
+	hasJudge(): boolean {
+		return this.judge !== undefined;
+	}
+
+	onJudgement(listener: PermissionJudgementListener | undefined): void {
+		this.judgementListener = listener;
+	}
+
 	isAlwaysAllowed(toolName: string): boolean {
 		return this.alwaysAllow.has(toolName);
 	}
@@ -121,7 +165,21 @@ export class PermissionGate {
 		if (!isMutatingTool(request.toolName)) return { allowed: true };
 		if (this.alwaysAllow.has(request.toolName)) return { allowed: true };
 		if (signal?.aborted) return { allowed: false, reason: CANCEL_REASON };
-		if (!this.approver) return { allowed: false, reason: NO_APPROVER_REASON };
+
+		const judgement = await this.runJudge(request, signal);
+		if (judgement?.decision === "allow") return { allowed: true };
+		if (judgement?.decision === "reject") {
+			return { allowed: false, reason: `${JUDGE_REJECT_PREFIX}${judgement.reason}. ${JUDGE_REJECT_SUFFIX}` };
+		}
+		if (signal?.aborted) return { allowed: false, reason: CANCEL_REASON };
+		if (!this.approver) {
+			return {
+				allowed: false,
+				reason: judgement
+					? `${NO_APPROVER_REASON} Judge asked for review: ${judgement.reason}.`
+					: NO_APPROVER_REASON,
+			};
+		}
 
 		const decision = await this.enqueue(request, signal);
 
@@ -138,6 +196,26 @@ export class PermissionGate {
 			default:
 				return { allowed: false, reason: DENY_REASON };
 		}
+	}
+
+	/** Ask the judge, if any. Errors and aborts yield no judgement, never an allow. */
+	private async runJudge(request: PermissionRequest, signal?: AbortSignal): Promise<PermissionJudgement | undefined> {
+		const judge = this.judge;
+		if (!judge) return undefined;
+		let judgement: PermissionJudgement;
+		try {
+			judgement = await judge(request, signal);
+		} catch (error) {
+			judgement = {
+				decision: "ask",
+				reason: `judge unavailable (${error instanceof Error ? error.message : String(error)})`,
+			};
+		}
+		if (judgement.decision !== "allow" && judgement.decision !== "reject") {
+			judgement = { ...judgement, decision: "ask" };
+		}
+		this.judgementListener?.(request, judgement);
+		return judgement;
 	}
 
 	/**

@@ -10,6 +10,7 @@
 
 ### Added
 
+- Added a Jev ("auto mode") pre-screen for gated tool calls via `permissions.judge`. TypeSafe's Jev model judges each mutating call against the user's request; confident routine calls run unprompted, confident dangerous calls are blocked, and everything else reaches the normal prompt. With a judge configured, print and RPC modes stay gated instead of auto-approving, and undecided calls are denied.
 - Added built-in Kimi For Coding OAuth authentication using Kimi's device authorization flow.
 - Added the built-in `void` child orchestration extension with Provider selection, concurrent spawn, resume, cancellation, model and effort controls, and the `/agents` view.
 - Added `/theme` to switch the color theme with live preview, and `/color` to pin the splash art palette (`amber`, `green`, `blue`, `red`, `violet`, or `random`). The palette choice persists in settings.
