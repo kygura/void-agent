@@ -1,0 +1,9 @@
+{
+  "name": "context-bar",
+  "version": "0.1.0",
+  "description": "Band above the prompt: context window fill for the main loop and each subagent, cost and rate limits",
+  "author": {
+    "name": "kygura"
+  },
+  "types": "./types/index.d.ts"
+}

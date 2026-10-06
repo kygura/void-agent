@@ -1,0 +1,21 @@
+{
+  "name": "void-mods",
+  "description": "Claude Code mods for agentic development in void-agent: agent panel, context bar, repo rules guard",
+  "owner": {
+    "name": "kygura"
+  },
+  "plugins": [
+    {
+      "name": "agent-deck",
+      "source": "./claude-mods/agent-deck"
+    },
+    {
+      "name": "context-bar",
+      "source": "./claude-mods/context-bar"
+    },
+    {
+      "name": "repo-guard",
+      "source": "./claude-mods/repo-guard"
+    }
+  ]
+}

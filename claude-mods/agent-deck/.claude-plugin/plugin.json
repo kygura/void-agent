@@ -1,0 +1,9 @@
+{
+  "name": "agent-deck",
+  "version": "0.1.0",
+  "description": "Agent panel: every agent loop with its model, effort, live tool, token use and the session's task progress",
+  "author": {
+    "name": "kygura"
+  },
+  "types": "./types/index.d.ts"
+}

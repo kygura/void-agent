@@ -1,0 +1,9 @@
+{
+  "name": "repo-guard",
+  "version": "0.1.0",
+  "description": "Enforces the AGENTS.md git and command rules: no sweeping git ops, no dev/build/test runs, no commit before npm run check",
+  "author": {
+    "name": "kygura"
+  },
+  "types": "./types/index.d.ts"
+}
