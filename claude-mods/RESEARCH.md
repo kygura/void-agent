@@ -54,6 +54,13 @@ A subagent's context window is not reported. `context-bar` reads it off the mode
 - Render hooks never write state. Write from `onPress` or another event, with `update($, atom, fn)` so two quick presses both land.
 - Hooks that can refuse something (`tool.call`, `command.run`, `agent.spawn`) are listed as gates. An observer should carry `.catch(($, e, next) => next(e))` so a bug never blocks a tool or a spawn; a guard should refuse in its `.catch` (`git-guard` does).
 - No `import()`. Plugin files import each other with static imports.
+- A slash command named like a built-in (`/color` is one) is refused at registration, and the throw skips the rest of that `session.start` hook. Watch the validator: a mod's own command should read "answers its own command"; if it reads as a gating hook, the name is taken. Register tools before commands so a refused name can't take the tool down with it.
+
+## Live check
+
+Loaded with hot reload in a cloud session: all five mods loaded. `mcp__ascii-canvas__draw` worked when the model called it. The first load of `color-picker` lost its `show_palette` tool to the `/color` collision described above; it is now `/swatch`.
+
+The engine-generated `tsconfig.json` also pulls in `claude-code-mcp`, the types for every connected MCP tool. In a session with hundreds of connector tools that makes `tsc -p` very slow, and it reports TS2589 (type instantiation too deep) on `$.tool.call` in tests. To type-check a mod there, point a tsconfig at `claude-code/index.d.ts` alone.
 
 ## Testing
 

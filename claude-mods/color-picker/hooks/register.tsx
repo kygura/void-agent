@@ -31,11 +31,6 @@ async function conversationColors($: EngineInterface): Promise<Swatch[]> {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'color',
-      description: 'Open the color pane on a color (#hex, rgb(), hsl(), a name), the selection, or colors from the conversation',
-      argumentHint: '[color]',
-    })
     await $.tool.register({
       name: 'show_palette',
       description:
@@ -56,10 +51,15 @@ export const register: Register = on => {
         required: ['colors'],
       },
     })
+    await $.command.register({
+      name: 'swatch',
+      description: 'Open the color pane on a color (#hex, rgb(), hsl(), a name), the selection, or colors from the conversation',
+      argumentHint: '[color]',
+    })
     return next(e)
   })
 
-  on('command.run', { command: 'color' }, async ($, e) => {
+  on('command.run', { command: 'swatch' }, async ($, e) => {
     let hex = parseColor(e.args)
     let found: Swatch[] = []
     if (hex === undefined) {
