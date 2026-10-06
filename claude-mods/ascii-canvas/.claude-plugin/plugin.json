@@ -1,0 +1,7 @@
+{
+  "name": "ascii-canvas",
+  "version": "0.1.0",
+  "description": "An ASCII canvas pane: the model sketches diagrams and mockups into it, /banner draws block letters, /flow draws box-and-arrow chains, /styles samples the surface's borders, text styles and theme colors",
+  "author": { "name": "kygura" },
+  "types": "./types/index.d.ts"
+}

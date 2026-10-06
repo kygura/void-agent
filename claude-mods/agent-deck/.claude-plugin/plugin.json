@@ -1,0 +1,15 @@
+{
+  "name": "agent-deck",
+  "version": "0.1.0",
+  "description": "A live agent panel: the main loop and every subagent with model, effort, step, context and current tool, plus the task list's progress",
+  "author": { "name": "kygura" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "openOnSpawn": {
+      "type": "boolean",
+      "title": "Open on first subagent",
+      "description": "Open the panel by itself when a subagent starts (it docks from 144 columns, waits below that)",
+      "default": true
+    }
+  }
+}

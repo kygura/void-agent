@@ -1,0 +1,36 @@
+{
+  "name": "void-mods",
+  "owner": {
+    "name": "kygura"
+  },
+  "metadata": {
+    "description": "Claude Code mods for agentic development in the void repo: agent panel, context bar, ASCII canvas, color picker, git guard"
+  },
+  "plugins": [
+    {
+      "name": "agent-deck",
+      "source": "./claude-mods/agent-deck",
+      "description": "Live agent panel: model, effort, step, context and current tool per agent, plus task progress"
+    },
+    {
+      "name": "context-bar",
+      "source": "./claude-mods/context-bar",
+      "description": "Context meter above the prompt, split per subagent, with cost and rate limits"
+    },
+    {
+      "name": "ascii-canvas",
+      "source": "./claude-mods/ascii-canvas",
+      "description": "ASCII canvas pane: model sketches, block-letter banners, flow diagrams, style sampler"
+    },
+    {
+      "name": "color-picker",
+      "source": "./claude-mods/color-picker",
+      "description": "Color pane with formats, nudges, ramp, harmonies, contrast and a palette tool"
+    },
+    {
+      "name": "git-guard",
+      "source": "./claude-mods/git-guard",
+      "description": "Refuses the git operations AGENTS.md forbids for parallel agents"
+    }
+  ]
+}

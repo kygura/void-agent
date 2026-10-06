@@ -1,0 +1,7 @@
+{
+  "name": "color-picker",
+  "version": "0.1.0",
+  "description": "A color pane: swatch, hex/rgb/hsl/oklch with copy, nudges, tint ramp, harmonies, WCAG contrast, colors found in the conversation, and a palette tool the model can call",
+  "author": { "name": "kygura" },
+  "types": "./types/index.d.ts"
+}
