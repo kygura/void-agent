@@ -183,7 +183,7 @@ describe("FooterComponent statusline integration", () => {
 		const footer = new FooterComponent(session, createFooterData());
 		const line = stripAnsi(footer.render(80)[1]!);
 
-		expect(line).toContain("test-model ████░░");
+		expect(line).toContain("test-model ███░░");
 		expect(line).not.toContain("thinking");
 	});
 
