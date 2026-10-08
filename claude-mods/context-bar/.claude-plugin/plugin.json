@@ -1,0 +1,15 @@
+{
+  "name": "context-bar",
+  "version": "0.1.0",
+  "description": "A context meter above the prompt: window fill, cost and rate limits for the session, plus each subagent's own context and token spend",
+  "author": { "name": "kygura" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "warnAt": {
+      "type": "number",
+      "title": "Warn at percent",
+      "description": "Toast once when the main context window passes this fill",
+      "default": 80
+    }
+  }
+}

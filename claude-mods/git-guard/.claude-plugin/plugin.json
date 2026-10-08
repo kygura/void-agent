@@ -1,0 +1,16 @@
+{
+  "name": "git-guard",
+  "version": "0.1.0",
+  "description": "Refuses destructive git commands (reset --hard, clean -f, stash, add -A, --no-verify, force push) so parallel agents never wipe each other's work",
+  "author": {
+    "name": "kygura"
+  },
+  "userConfig": {
+    "allowForceWithLease": {
+      "type": "boolean",
+      "title": "Allow --force-with-lease",
+      "description": "Let git push --force-with-lease through while plain --force stays refused",
+      "default": true
+    }
+  }
+}
