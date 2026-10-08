@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed bare `readline` import to use `node:readline` prefix for Deno compatibility ([#2885](https://github.com/badlogic/pi-mono/issues/2885) by [@milosv-vtool](https://github.com/milosv-vtool))
+- Fixed `build` regenerating `models.generated.ts` from live provider APIs, which broke typechecking whenever a provider retired a model referenced in tests. Regeneration is now manual via `generate-models`.
 
 ## [0.65.2] - 2026-04-06
 
